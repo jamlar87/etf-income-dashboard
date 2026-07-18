@@ -1188,7 +1188,7 @@ def _run_monte_carlo(tickers, lookback_months, tax_scores):
     price_data = _get_monthly_prices(conn, tickers)
     conn.close()
 
-    n_simulations = min(3000, max(200, math.comb(len(tickers), 4) * 5))
+    n_simulations = min(10000, max(500, len(tickers) * 10))
     random.seed(42)
 
     results = []
@@ -1269,7 +1269,7 @@ def _run_monte_carlo(tickers, lookback_months, tax_scores):
         if len(portfolio_monthly_rets) >= 2:
             avg_mret = sum(portfolio_monthly_rets) / len(portfolio_monthly_rets)
             std_mret = (sum((r - avg_mret) ** 2 for r in portfolio_monthly_rets) / len(portfolio_monthly_rets)) ** 0.5
-            sharpe = (avg_mret * 12 - 0.045) / (std_mret * (12 ** 0.5)) if std_mret > 0 else 0
+            sharpe = (avg_mret * 12 - 0.03) / (std_mret * (12 ** 0.5)) if std_mret > 0 else 0
         else:
             sharpe = 0
 
