@@ -387,4 +387,27 @@ td.yield-col { color: var(--accent2); font-weight: 600; }
 .stat-val { display: block; font-size: 1.4em; font-weight: 700; color: var(--accent); }
 .stat-label { font-size: 0.75em; color: var(--text-dim); margin-top: 3px; }
 
+/* Tab bar */
+.tab-bar {
+    display: flex;
+    gap: 2px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.tab-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 8px 18px;
+    cursor: pointer;
+    font-size: 0.82em;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+}
+
+.tab-btn:hover { color: var(--text); background: rgba(79,195,247,0.04); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
 .hint { color: var(--text-dim); font-size: 0.82em; font-style: italic; }

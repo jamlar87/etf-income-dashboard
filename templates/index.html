@@ -149,6 +149,20 @@
                 </table>
             </div>
         </div>
+
+        <!-- Key Metrics Comparison Chart -->
+        <div class="card">
+            <h2>📊 Key Metrics Comparison</h2>
+            <div class="tab-bar" id="metric-tabs">
+                <button class="tab-btn active" data-metric="yield">Yield</button>
+                <button class="tab-btn" data-metric="coverage">Distribution Coverage</button>
+                <button class="tab-btn" data-metric="sharpe">Sharpe Ratio</button>
+                <button class="tab-btn" data-metric="returns">Returns</button>
+            </div>
+            <div class="chart-container" style="height:400px;margin-top:12px">
+                <canvas id="metrics-chart"></canvas>
+            </div>
+        </div>
     </section>
 
     <!-- DISTRIBUTION YIELD -->

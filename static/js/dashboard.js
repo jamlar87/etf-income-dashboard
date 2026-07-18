@@ -180,6 +180,8 @@ async function loadOverview() {
 }
 
 // === COMPARE TABLE ===
+let metricsChart = null;
+
 async function loadCompare() {
     if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
     const providers = [...new Set(allEtfs.map(e => e.provider))].sort();
@@ -189,6 +191,16 @@ async function loadCompare() {
     document.getElementById('provider-filter').onchange = renderTable;
     document.getElementById('sort-by').onchange = renderTable;
     document.getElementById('sort-desc').onchange = renderTable;
+
+    // Tabbed metrics chart
+    document.querySelectorAll('#metric-tabs .tab-btn').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('#metric-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderMetricsChart(btn.dataset.metric);
+        };
+    });
+    renderMetricsChart('yield');
 }
 
 function renderTable() {
@@ -228,6 +240,80 @@ function renderTable() {
             <td>${fmt(e.correlation_sp500)}</td>
         </tr>
     `).join('');
+}
+
+function renderMetricsChart(metric) {
+    if (!allEtfs.length) return;
+    const ctx = document.getElementById('metrics-chart').getContext('2d');
+    if (metricsChart) metricsChart.destroy();
+
+    let labels, data, label, color;
+
+    switch (metric) {
+        case 'yield':
+            const byYield = [...allEtfs].filter(e => e.current_yield != null).sort((a,b) => b.current_yield - a.current_yield);
+            labels = byYield.slice(0, 15).map(e => e.ticker).reverse();
+            data = {
+                current: byYield.slice(0, 15).map(e => e.current_yield).reverse(),
+                avg: byYield.slice(0, 15).map(e => e.avg_yield_since_inception || 0).reverse(),
+            };
+            label = 'Current Yield %';
+            break;
+        case 'coverage':
+            const byCov = [...allEtfs].filter(e => e.distribution_coverage != null).sort((a,b) => b.distribution_coverage - a.distribution_coverage);
+            labels = byCov.slice(0, 15).map(e => e.ticker).reverse();
+            data = { coverage: byCov.slice(0, 15).map(e => e.distribution_coverage).reverse() };
+            label = 'Distribution Coverage (x)';
+            break;
+        case 'sharpe':
+            const bySh = [...allEtfs].filter(e => e.sharpe_ratio != null).sort((a,b) => b.sharpe_ratio - a.sharpe_ratio);
+            labels = bySh.slice(0, 15).map(e => e.ticker).reverse();
+            data = { sharpe: bySh.slice(0, 15).map(e => e.sharpe_ratio).reverse() };
+            label = 'Sharpe Ratio';
+            break;
+        case 'returns':
+            const byRet = [...allEtfs].filter(e => e.total_return_1yr != null).sort((a,b) => b.total_return_1yr - a.total_return_1yr);
+            labels = byRet.slice(0, 15).map(e => e.ticker).reverse();
+            data = { t12: byRet.slice(0, 15).map(e => e.total_return_1yr).reverse() };
+            label = 'Total Return T12M %';
+            break;
+        default: return;
+    }
+
+    const datasets = [];
+    if (data.current) {
+        datasets.push({ label: 'Current Yield', data: data.current, backgroundColor: '#4fc3f7', borderRadius: 2 });
+    }
+    if (data.avg) {
+        datasets.push({ label: 'Avg Yield (Inception)', data: data.avg, backgroundColor: '#46b97e', borderRadius: 2 });
+    }
+    if (data.coverage) {
+        datasets.push({ label: 'Distribution Coverage', data: data.coverage, backgroundColor: '#4a90d9', borderRadius: 2 });
+    }
+    if (data.sharpe) {
+        datasets.push({ label: 'Sharpe Ratio', data: data.sharpe, backgroundColor: '#f0a030', borderRadius: 2 });
+    }
+    if (data.t12) {
+        datasets.push({ label: 'T12M Total Return', data: data.t12, backgroundColor: '#46b97e', borderRadius: 2 });
+    }
+
+    metricsChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#ccc', font: { size: 10 } } },
+                title: { display: true, text: label, color: '#e8eaed' }
+            },
+            scales: {
+                x: { grid: { color: '#1e2538' }, ticks: { color: '#888' } },
+                y: { grid: { color: '#1e2538' }, ticks: { color: '#888', font: { size: 10 } } },
+            }
+        }
+    });
 }
 
 // === DISTRIBUTION YIELD ===
