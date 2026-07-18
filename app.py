@@ -1188,7 +1188,7 @@ def _run_monte_carlo(tickers, lookback_months, tax_scores):
     price_data = _get_monthly_prices(conn, tickers)
     conn.close()
 
-    n_simulations = min(10000, max(500, len(tickers) * 10))
+    n_simulations = min(20000, max(1000, len(tickers) * 20))
     random.seed(42)
 
     results = []
