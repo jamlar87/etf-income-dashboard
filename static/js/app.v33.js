@@ -376,8 +376,8 @@ function renderTable() {
     const desc = document.getElementById('sort-desc')?.checked || true;
     let etfs = provider ? allEtfs.filter(e => e.provider === provider) : [...allEtfs];
     etfs.sort((a, b) => {
-        const va = a[sortBy] ?? (desc ? Infinity : -Infinity);
-        const vb = b[sortBy] ?? (desc ? Infinity : -Infinity);
+        const va = a[sortBy] ?? (desc ? -Infinity : Infinity);
+        const vb = b[sortBy] ?? (desc ? -Infinity : Infinity);
         return desc ? vb - va : va - vb;
     });
     document.querySelectorAll('#etf-table th').forEach(th => {
