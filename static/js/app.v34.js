@@ -1144,60 +1144,123 @@ function drawPfChart(tab) {
 }
 
 // === BEST PORTFOLIOS ===
+function renderBestPortfolios(portfolios, table, singleCriterion) {
+    table.innerHTML = portfolios.map((p, i) => `
+        <div class="bp-row" style="cursor:pointer" data-pf='${encodeURIComponent(JSON.stringify(p.etfs || []))}'>
+            <div class="bp-rank">#${i+1}</div>
+            <div class="bp-metrics">
+                <div class="bp-metric"><span class="val">$${Number(p.available_income_per_10k || p.monthly_income * 12 / 10).toLocaleString()}</span><span class="lbl">Avail Inc/10k <span class="info-tip" data-tip="Annualized average cash income per $10,000 invested. Higher is better for income seekers.">ⓘ</span></span></div>
+                <div class="bp-metric"><span class="val">${p.avg_yield}%</span><span class="lbl">Avg Yield <span class="info-tip" data-tip="Average portfolio yield over the full backtest period. Based on actual dividends received.">ⓘ</span></span></div>
+                <div class="bp-metric"><span class="val">${p.nav_change >= 0 ? '+' : ''}${p.nav_change}%</span><span class="lbl">NAV Change <span class="info-tip" data-tip="Price-only change in portfolio value. Excludes dividends. Negative = the portfolio principal shrank.">ⓘ</span></span></div>
+                <div class="bp-metric"><span class="val">${p.total_return >= 0 ? '+' : ''}${p.total_return}%</span><span class="lbl">Total Return <span class="info-tip" data-tip="Total portfolio return including both NAV change and dividends received. Real-world performance.">ⓘ</span></span></div>
+                <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe <span class="info-tip" data-tip="Risk-adjusted return. Higher = better return per unit of volatility. Above 1 is good.">ⓘ</span></span></div>
+                <div class="bp-metric"><span class="val">${p.num_etfs || (p.etfs||[]).length}</span><span class="lbl">#ETFs <span class="info-tip" data-tip="Number of ETFs in this portfolio combination (randomized between 4-8).">ⓘ</span></span></div>
+            </div>
+            <div class="bp-etfs">${(p.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '" data-ticker="' + e.ticker + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
+        </div>`).join('');
+    wireBestPortfolioClicks(table);
+}
 async function loadBestPortfolios() {
     try {
         const period = document.getElementById('bp-period')?.value || '1yr';
-        const sortBy = document.getElementById('bp-sort')?.value || 'income';
         const perEl = document.getElementById('bp-period');
-        const sortEl = document.getElementById('bp-sort');
         if (perEl) perEl.onchange = loadBestPortfolios;
-        if (sortEl) sortEl.onchange = loadBestPortfolios;
-        const d = await (await fetch(`${API}/best-portfolios?period=${period}&sort_by=${sortBy}`)).json();
+        // Wire checkboxes
+        document.querySelectorAll('.bp-sort-cb').forEach(cb => {
+            cb.onchange = loadBestPortfolios;
+        });
+        const checked = [...document.querySelectorAll('.bp-sort-cb:checked')].map(cb => cb.value);
         const el = document.getElementById('bp-eligible');
-        if (el) el.textContent = `${d.eligible_etfs} ETFs have 1+ years of history for this period.`;
         const table = document.getElementById('best-portfolios-table');
         if (!table) return;
-        if (!d.portfolios?.length) {
-            table.innerHTML = '<p class="hint">Not enough ETFs with sufficient history.</p>';
+        if (!checked.length) {
+            table.innerHTML = '<p class="hint">Check at least one filter criterion above.</p>';
+            if (el) el.textContent = '';
             return;
         }
-        table.innerHTML = d.portfolios.map((p, i) => `
-            <div class="bp-row" style="cursor:pointer" data-pf='${encodeURIComponent(JSON.stringify(p.etfs || []))}'>
+        // Fetch top 25 for each checked criterion
+        const results = await Promise.all(checked.map(async sortBy => {
+            const d = await (await fetch(`${API}/best-portfolios?period=${period}&sort_by=${sortBy}`)).json();
+            return { sortBy, eligible: d.eligible_etfs, portfolios: d.portfolios || [] };
+        }));
+        // Show eligible count from first result
+        if (el && results.length) el.textContent = `${results[0].eligible} ETFs have 1+ years of history for this period.`;
+        // Build portfolio index by ETF composition signature
+        const sigMap = new Map(); // signature -> { portfolios: [{rank, sortBy, data}], ranks: {} }
+        results.forEach((r, ri) => {
+            r.portfolios.forEach((p, i) => {
+                const sig = [...p.etfs].map(e => e.ticker).sort().join('|');
+                if (!sigMap.has(sig)) sigMap.set(sig, { data: p, ranks: {}, sig });
+                sigMap.get(sig).ranks[checked[ri]] = i + 1; // 1-based rank
+                // Keep the first data object we saw (they're all similar)
+            });
+        });
+        // If only one criterion, show that list directly
+        if (checked.length === 1) {
+            const r = results[0];
+            renderBestPortfolios(r.portfolios, table, checked[0], null);
+            return;
+        }
+        // Multiple criteria: find intersection
+        const intersection = [];
+        for (const [sig, entry] of sigMap) {
+            const rankKeys = Object.keys(entry.ranks);
+            // Must appear in ALL checked criteria
+            if (checked.every(c => entry.ranks[c] !== undefined)) {
+                const avgRank = checked.reduce((sum, c) => sum + entry.ranks[c], 0) / checked.length;
+                intersection.push({ ...entry, avgRank });
+            }
+        }
+        // Sort by average rank
+        intersection.sort((a, b) => a.avgRank - b.avgRank);
+        if (intersection.length === 0) {
+            table.innerHTML = `<p class="hint">No portfolios rank in the top 25 across all checked criteria. Try checking fewer boxes.</p>`;
+            return;
+        }
+        // Render intersection
+        table.innerHTML = intersection.map((p, i) => {
+            const data = p.data;
+            const rankTags = checked.map(c => `<span class="bp-rank-badge">${c}: #${p.ranks[c]}</span>`).join(' ');
+            return `<div class="bp-row" style="cursor:pointer" data-pf='${encodeURIComponent(JSON.stringify(data.etfs || []))}'>
                 <div class="bp-rank">#${i+1}</div>
                 <div class="bp-metrics">
-                    <div class="bp-metric"><span class="val">$${Number(p.available_income_per_10k || p.monthly_income * 12 / 10).toLocaleString()}</span><span class="lbl">Avail Inc/10k <span class="info-tip" data-tip="Annualized average cash income per $10,000 invested. Higher is better for income seekers.">ⓘ</span></span></div>
-                    <div class="bp-metric"><span class="val">${p.avg_yield}%</span><span class="lbl">Avg Yield <span class="info-tip" data-tip="Average portfolio yield over the full backtest period. Based on actual dividends received.">ⓘ</span></span></div>
-                    <div class="bp-metric"><span class="val">${p.nav_change >= 0 ? '+' : ''}${p.nav_change}%</span><span class="lbl">NAV Change <span class="info-tip" data-tip="Price-only change in portfolio value. Excludes dividends. Negative = the portfolio principal shrank.">ⓘ</span></span></div>
-                    <div class="bp-metric"><span class="val">${p.total_return >= 0 ? '+' : ''}${p.total_return}%</span><span class="lbl">Total Return <span class="info-tip" data-tip="Total portfolio return including both NAV change and dividends received. Real-world performance.">ⓘ</span></span></div>
-                    <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe <span class="info-tip" data-tip="Risk-adjusted return. Higher = better return per unit of volatility. Above 1 is good.">ⓘ</span></span></div>
-                    <div class="bp-metric"><span class="val">${p.num_etfs || (p.etfs||[]).length}</span><span class="lbl">#ETFs <span class="info-tip" data-tip="Number of ETFs in this portfolio combination (randomized between 4-8).">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">$${Number(data.available_income_per_10k || data.monthly_income * 12 / 10).toLocaleString()}</span><span class="lbl">Avail Inc/10k <span class="info-tip" data-tip="Annualized average cash income per $10,000 invested. Higher is better for income seekers.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${data.avg_yield}%</span><span class="lbl">Avg Yield <span class="info-tip" data-tip="Average portfolio yield over the full backtest period. Based on actual dividends received.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${data.nav_change >= 0 ? '+' : ''}${data.nav_change}%</span><span class="lbl">NAV Change <span class="info-tip" data-tip="Price-only change in portfolio value. Excludes dividends. Negative = the portfolio principal shrank.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${data.total_return >= 0 ? '+' : ''}${data.total_return}%</span><span class="lbl">Total Return <span class="info-tip" data-tip="Total portfolio return including both NAV change and dividends received. Real-world performance.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${data.sharpe}</span><span class="lbl">Sharpe <span class="info-tip" data-tip="Risk-adjusted return. Higher = better return per unit of volatility. Above 1 is good.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${data.num_etfs || (data.etfs||[]).length}</span><span class="lbl">#ETFs <span class="info-tip" data-tip="Number of ETFs in this portfolio combination (randomized between 4-8).">ⓘ</span></span></div>
                 </div>
-                <div class="bp-etfs">${(p.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '" data-ticker="' + e.ticker + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
-            </div>`).join('');
-
-        // Wire click-to-load for best portfolio rows
-        table.querySelectorAll('.bp-row').forEach(row => {
-            row.onclick = () => {
-                try {
-                    const raw = decodeURIComponent(row.dataset.pf);
-                    const etfs = JSON.parse(raw);
-                    if (!etfs || !etfs.length) return;
-                    const loaded = etfs.map(e => {
-                        const info = allEtfs.find(x => x.ticker === e.ticker);
-                        return {
-                            ticker: e.ticker,
-                            name: info ? info.name : e.ticker,
-                            weight: parseFloat(e.weight) || (100 / etfs.length),
-                            yield: info ? info.current_yield : null,
-                        };
-                    });
-                    portfolioEtfs.length = 0;
-                    portfolioEtfs.push(...loaded);
-                    renderPortfolio();
-                    document.getElementById('portfolio')?.scrollIntoView({ behavior: 'smooth' });
-                    setTimeout(simulatePortfolio, 400);
-                } catch(e) { console.warn('load best portfolio:', e); }
-            };
-        });
+                <div class="bp-badges">${rankTags}</div>
+                <div class="bp-etfs">${(data.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '" data-ticker="' + e.ticker + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
+            </div>`;
+        }).join('');
+        // Wire click-to-load
+        wireBestPortfolioClicks(table);
     } catch(e) { console.warn('loadBestPortfolios:', e.message); }
+}
+function wireBestPortfolioClicks(table) {
+    table.querySelectorAll('.bp-row').forEach(row => {
+        row.onclick = () => {
+            try {
+                const raw = decodeURIComponent(row.dataset.pf);
+                const etfs = JSON.parse(raw);
+                if (!etfs || !etfs.length) return;
+                const loaded = etfs.map(e => {
+                    const info = allEtfs.find(x => x.ticker === e.ticker);
+                    return {
+                        ticker: e.ticker,
+                        name: info ? info.name : e.ticker,
+                        weight: parseFloat(e.weight) || (100 / etfs.length),
+                        yield: info ? info.current_yield : null,
+                    };
+                });
+                portfolioEtfs.length = 0;
+                portfolioEtfs.push(...loaded);
+                renderPortfolio();
+                document.getElementById('portfolio')?.scrollIntoView({ behavior: 'smooth' });
+                setTimeout(simulatePortfolio, 400);
+            } catch(e) { console.warn('load best portfolio:', e); }
+        };
+    });
 }

@@ -392,14 +392,13 @@
                     </select>
                     <span class="info-tip" data-tip="Select the lookback period for the Monte Carlo simulation. Longer periods include fewer eligible ETFs (older funds only).">ⓘ</span>
                 </label>
-                <label>Sort by:
-                    <select id="bp-sort">
-                        <option value="income">Income</option>
-                        <option value="total_return">Total Return</option>
-                        <option value="nav_change">NAV Change</option>
-                        <option value="sharpe">Sharpe Ratio</option>
-                    </select>
-                    <span class="info-tip" data-tip="Sort the top 25 portfolios by income (annualized avail/10K), total return, NAV change, or Sharpe ratio.">ⓘ</span>
+                <label style="flex-wrap:wrap;gap:4px;font-size:0.82em">
+                    <span style="color:var(--text-dim);margin-right:4px">Filter:</span>
+                    <label class="bp-cb"><input type="checkbox" class="bp-sort-cb" value="income" checked> Income</label>
+                    <label class="bp-cb"><input type="checkbox" class="bp-sort-cb" value="total_return"> Total Return</label>
+                    <label class="bp-cb"><input type="checkbox" class="bp-sort-cb" value="nav_change"> NAV Change</label>
+                    <label class="bp-cb"><input type="checkbox" class="bp-sort-cb" value="sharpe"> Sharpe</label>
+                    <span class="info-tip" data-tip="Check one or more criteria. Portfolios that rank in the top 25 for ALL checked criteria are shown.">ⓘ</span>
                 </label>
                 <span id="bp-eligible" class="hint"></span>
             </div>
@@ -409,6 +408,6 @@
 
 </main>
 
-<script src="/static/js/app.v33.js" defer></script>
+<script src="/static/js/app.v34.js" defer></script>
 </body>
 </html>
