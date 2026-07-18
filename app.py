@@ -748,6 +748,7 @@ def simulate_portfolio(data: dict):
 
     monthly_nav = []
     monthly_income = []
+    monthly_cash_received = []
     monthly_no_reinvest = []
 
     # Record initial shares for no-reinvest calculation
@@ -805,6 +806,7 @@ def simulate_portfolio(data: dict):
 
         monthly_nav.append(round(current_nav, 2))
         monthly_income.append(round(month_income, 2))
+        monthly_cash_received.append(round(month_income * (1 - reinvest_pct), 2))
 
         # NAV-only: initial shares at current prices (no reinvestment)
         nr_value = 0
@@ -837,6 +839,7 @@ def simulate_portfolio(data: dict):
         "start_date": start_date,
         'monthly_nav': monthly_nav,
         'monthly_income': monthly_income,
+        'monthly_cash_received': monthly_cash_received,
         'monthly_no_reinvest': monthly_no_reinvest,
     }
 

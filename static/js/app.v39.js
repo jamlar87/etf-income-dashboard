@@ -1129,10 +1129,10 @@ function drawPfChart(tab) {
             }, options: sharedOpts
         });
     } else if (tab === 'income') {
-        sharedOpts.plugins.title.text = 'Monthly Income';
-        sharedOpts.plugins.legend.display = false;
+        sharedOpts.plugins.title.text = 'Monthly Income — Total Dividends vs Cash Received';
+        sharedOpts.plugins.legend.display = true;
         // Update income stats
-        const monthlyInc = r.monthly_income || [];
+        const monthlyInc = r.monthly_cash_received || [];
         const avgInc = monthlyInc.length > 0 ? monthlyInc.reduce((a,b) => a+b, 0) / monthlyInc.length : 0;
         const annInc = avgInc * 12;
         const yieldCost = r.initial_investment > 0 ? (annInc / r.initial_investment) * 100 : 0;
@@ -1142,10 +1142,20 @@ function drawPfChart(tab) {
         if (avgEl) avgEl.textContent = '$' + Number(avgInc).toLocaleString();
         if (annEl2) annEl2.textContent = '$' + Number(annInc).toLocaleString();
         if (yocEl) yocEl.textContent = yieldCost.toFixed(1) + '%';
+        
+        // Stacked bar: Cash Received + Reinvested = Total Dividends
+        const cashR = r.monthly_cash_received || [];
+        const reinvested = r.monthly_income.map((v, i) => Math.max(0, v - (cashR[i] || 0)));
         pfChartNav = new Chart(ctx, {
             type: 'bar',
-            data: { labels, datasets: [{ label: 'Income', data: r.monthly_income, backgroundColor: '#3696d3', borderRadius: 2 }] },
-            options: sharedOpts
+            data: {
+                labels,
+                datasets: [
+                    { label: 'Cash Received', data: cashR, backgroundColor: '#34a853', borderRadius: 2 },
+                    { label: 'Reinvested', data: reinvested, backgroundColor: '#5b9bd5', borderRadius: 2 },
+                ]
+            },
+            options: { ...sharedOpts, scales: { ...sharedOpts.scales, x: { ...sharedOpts.scales.x, stacked: true }, y: { ...sharedOpts.scales.y, stacked: true } } }
         });
     } else if (tab === 'nav') {
         sharedOpts.plugins.title.text = 'NAV Analysis — Portfolio Value & NAV Only';
