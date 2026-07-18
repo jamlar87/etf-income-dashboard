@@ -373,8 +373,6 @@ async function loadOverview() {
 
 // === COMPARE TABLE ===
 let metricsChart = null;
-let _universeMode = 'full'; // 'full' or 'high_income'
-let _universeTotal = 0;
 
 function getUniverseMode() {
     const cb = document.getElementById('universe-mode');
@@ -395,7 +393,6 @@ function getQualityParams() {
 async function loadCompare() {
     try {
         const mode = getUniverseMode();
-        _universeMode = mode;
         
         // Show/hide quality filters based on mode
         const qf = document.getElementById('quality-filters');
@@ -432,7 +429,6 @@ async function loadCompare() {
         } else {
             const data = await resp.json();
             allEtfs = data.etfs;
-            _universeTotal = data.filtered || data.total;
             const badge = document.getElementById('universe-filter-badge');
             if (badge) badge.textContent = `${data.filtered || data.total} of ${data.total} total ETFs (filters applied)`;
         }
