@@ -1,5 +1,18 @@
 // ETF Dashboard JS — scroll-based layout (all sections visible)
 const API = '/api';
+// Click any element with data-ticker to open Seeking Alpha page
+document.addEventListener('click', function(e) {
+    let el = e.target;
+    while (el && el !== document) {
+        if (el.dataset && el.dataset.ticker) {
+            window.open('https://seekingalpha.com/symbol/' + el.dataset.ticker, '_blank');
+            e.preventDefault();
+            return;
+        }
+        el = el.parentElement;
+    }
+});
+
 let currentPeriod = '1yr';
 
 let allEtfs = [];
@@ -209,7 +222,7 @@ async function loadOverview() {
                 }
                 return `<div class="lb-row">
                     <span class="lb-rank">#${i+1}</span>
-                    <span class="lb-ticker">${e.ticker}</span>
+                    <span class="lb-ticker" data-ticker="${e.ticker}">${e.ticker}</span>
                     <span class="lb-val">${displayLabel}</span>
                     <span class="lb-val">${displayVal}</span>
                     <span class="lb-legend ${e.tier}"></span>
@@ -519,11 +532,11 @@ async function loadDistYield() {
         if (!el) return;
         el.innerHTML = `<div class="quick-lists">
             <div class="quick-list"><h3>🔝 Highest Current Yield</h3>
-                ${etfs.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker}</span><span class="yield-col">${pct(e.current_yield)}</span></div>`).join('')}
+                ${etfs.slice(0, 15).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker}</span><span class="yield-col">${pct(e.current_yield)}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>⚠️ Biggest Yield Gap (Current vs Avg)</h3>
                 ${etfs.filter(e => e.avg_yield_since_inception).sort((a,b) => Math.abs(b.current_yield - b.avg_yield_since_inception) - Math.abs(a.current_yield - a.avg_yield_since_inception)).slice(0, 15).map(e =>
-                    `<div class="ql-item"><span>${e.ticker}</span><span class="${Math.abs(e.current_yield - e.avg_yield_since_inception) > 10 ? 'negative' : ''}">${pct(e.current_yield)} vs ${pct(e.avg_yield_since_inception)}</span></div>`
+                    `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker}</span><span class="${Math.abs(e.current_yield - e.avg_yield_since_inception) > 10 ? 'negative' : ''}">${pct(e.current_yield)} vs ${pct(e.avg_yield_since_inception)}</span></div>`
                 ).join('')}
             </div>
         </div>`;
@@ -539,10 +552,10 @@ async function loadDistCoverage() {
         if (!el) return;
         el.innerHTML = `<div class="quick-lists">
             <div class="quick-list"><h3>✅ Best Coverage (1-2x ideal)</h3>
-                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--green)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
+                ${best.slice(0, 15).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--green)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>⚠️ Worst Coverage</h3>
-                ${worst.filter(e => e.distribution_coverage !== null).slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--red)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
+                ${worst.filter(e => e.distribution_coverage !== null).slice(0, 15).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--red)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
             </div>
         </div>`;
     } catch(e) { console.warn('loadDistCoverage:', e.message); }
@@ -566,10 +579,10 @@ async function loadNavErosion() {
             <p class="subtitle" style="color:var(--text-dim);font-size:0.82em;margin-bottom:12px">NAV Change since inception — Negative = capital loss even before distributions.</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
                 <div class="quick-list"><h3>📈 Strongest NAV Growth</h3>
-                    ${chartData.slice(-8).reverse().map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span class="positive">${pct(e.nav_annual_change)}</span></div>`).join('')}
+                    ${chartData.slice(-8).reverse().map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} (${pct(e.current_yield)})</span><span class="positive">${pct(e.nav_annual_change)}</span></div>`).join('')}
                 </div>
                 <div class="quick-list"><h3>📉 Worst NAV Erosion</h3>
-                    ${chartData.slice(0, 8).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span class="negative">${pct(e.nav_annual_change)}</span></div>`).join('')}
+                    ${chartData.slice(0, 8).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} (${pct(e.current_yield)})</span><span class="negative">${pct(e.nav_annual_change)}</span></div>`).join('')}
                 </div>
             </div>
             <div class="chart-container" style="height:1200px;overflow-y:auto">
@@ -708,7 +721,7 @@ async function loadTotalReturn() {
         periods.forEach(p => {
             const sorted = [...all].filter(e => e[p.key] !== null).sort((a,b) => b[p.key] - a[p.key]);
             html += `<div class="quick-list"><h3>Top 10 — ${p.label}</h3>
-                ${sorted.slice(0, 10).map(e => `<div class="ql-item"><span>${e.ticker}</span><span class="${e[p.key] >= 0 ? 'positive' : 'negative'}">${pct(e[p.key])}</span></div>`).join('')}
+                ${sorted.slice(0, 10).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker}</span><span class="${e[p.key] >= 0 ? 'positive' : 'negative'}">${pct(e[p.key])}</span></div>`).join('')}
             </div>`;
         });
         html += '</div>';
@@ -727,13 +740,13 @@ async function loadSharpe() {
         if (!el) return;
         el.innerHTML = `<div class="quick-lists">
             <div class="quick-list"><h3>🎯 Best Sharpe Ratio</h3>
-                ${bySharpe.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sharpe_ratio)}</span></div>`).join('')}
+                ${bySharpe.slice(0, 12).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker}</span><span>${fmt(e.sharpe_ratio)}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>🎯 Best Sortino Ratio</h3>
-                ${bySortino.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sortino_ratio)}</span></div>`).join('')}
+                ${bySortino.slice(0, 12).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker}</span><span>${fmt(e.sortino_ratio)}</span></div>`).join('')}
             </div>
             <div class="quick-list" style="grid-column:1/3;margin-top:10px"><h3>🎯 Best Calmar Ratio</h3>
-                ${byCalmar.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.name.slice(0,40)}</span><span>${fmt(e.calmar_ratio)}</span></div>`).join('')}
+                ${byCalmar.slice(0, 12).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} — ${e.name.slice(0,40)}</span><span>${fmt(e.calmar_ratio)}</span></div>`).join('')}
             </div>
         </div>`;
     } catch(e) { console.warn('loadSharpe:', e.message); }
@@ -749,10 +762,10 @@ async function loadT12Perf() {
         if (!el) return;
         el.innerHTML = `<div class="quick-lists">
             <div class="quick-list"><h3>🏆 Best T12 Total Return</h3>
-                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.provider}</span><span class="positive">${pct(e.total_return_1yr)}</span></div>`).join('')}
+                ${best.slice(0, 15).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} — ${e.provider}</span><span class="positive">${pct(e.total_return_1yr)}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>⚠️ Worst T12 Total Return</h3>
-                ${worst.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.provider}</span><span class="negative">${pct(e.total_return_1yr)}</span></div>`).join('')}
+                ${worst.slice(0, 15).map(e => `<div class="ql-item"><span data-ticker="${e.ticker}">${e.ticker} — ${e.provider}</span><span class="negative">${pct(e.total_return_1yr)}</span></div>`).join('')}
             </div>
         </div>`;
     } catch(e) { console.warn('loadT12Perf:', e.message); }
@@ -919,7 +932,7 @@ async function setupPortfolio() {
             if (q.length < 1) { dd.classList.remove('show'); return; }
             const matches = allEtfs.filter(e => e.ticker.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)).slice(0, 8);
             dd.innerHTML = matches.map(e => `<div class="pf-dropdown-item" data-t="${e.ticker}">
-                <span><span class="pf-dd-ticker">${e.ticker}</span> ${e.name.slice(0,28)}</span>
+                <span><span class="pf-dd-ticker" data-ticker="${e.ticker}">${e.ticker}</span> ${e.name.slice(0,28)}</span>
                 <span class="pf-dd-yield">${pct(e.current_yield)}</span></div>`).join('');
             dd.classList.add('show');
             dd.querySelectorAll('.pf-dropdown-item').forEach(item => {
@@ -1138,7 +1151,7 @@ async function loadBestPortfolios() {
                     <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe <span class="info-tip" data-tip="Risk-adjusted return. Higher = better return per unit of volatility. Above 1 is good.">ⓘ</span></span></div>
                     <div class="bp-metric"><span class="val">${p.num_etfs || (p.etfs||[]).length}</span><span class="lbl">#ETFs <span class="info-tip" data-tip="Number of ETFs in this portfolio combination (randomized between 4-8).">ⓘ</span></span></div>
                 </div>
-                <div class="bp-etfs">${(p.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
+                <div class="bp-etfs">${(p.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '" data-ticker="' + e.ticker + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
             </div>`).join('');
 
         // Wire click-to-load for best portfolio rows

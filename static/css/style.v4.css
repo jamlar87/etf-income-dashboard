@@ -556,3 +556,7 @@ th .info-tip::after {
 th .info-tip::before {
     bottom: calc(100% + 0px);
 }
+
+/* Clickable tickers — open Seeking Alpha */
+[data-ticker] { cursor: pointer; }
+[data-ticker]:hover { color: var(--accent); }
