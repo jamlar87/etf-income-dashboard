@@ -4,7 +4,7 @@ import random
 import math
 from datetime import datetime, timedelta
 from functools import lru_cache
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -793,6 +793,15 @@ def best_portfolios(
 
     conn.close()
 
+    # Load tax treatment scores from DB (already closed, load from etfs data on next query)
+    # We'll use a separate read since conn is closed
+    conn2 = get_db()
+    tax_rows = conn2.execute(
+        "SELECT ticker, tax_treatment_score FROM etfs WHERE tax_treatment_score IS NOT NULL"
+    ).fetchall()
+    tax_scores = {r["ticker"]: r["tax_treatment_score"] for r in tax_rows}
+    conn2.close()
+
     if len(recent_tickers) < 4:
         return {"portfolios": [], "eligible_etfs": len(recent_tickers), "period": period}
 
@@ -908,12 +917,9 @@ def best_portfolios(
         else:
             income_stability = 0.5
 
-        # Tax treatment proxy: fraction of total return from NAV appreciation
-        if total_return_pct > 1:
-            raw_tax = nav_change_pct / total_return_pct
-            tax_treatment = max(0, min(1, (raw_tax + 1) / 2))  # 0 = all dividends (less tax-eff), 1 = all appreciation (more tax-eff)
-        else:
-            tax_treatment = 0.5
+        # Tax treatment: weighted average of each ETF's manual tax_treatment_score (0-1)
+        scored = [tax_scores.get(t) for t in selected if tax_scores.get(t) is not None]
+        tax_treatment = round(sum(scored) / len(scored), 3) if scored else 0.5
 
         all_portfolios.append({
             "etfs": [{"ticker": selected[i], "weight": round(weights[i] * 100, 1)} for i in range(len(selected))],
@@ -955,6 +961,48 @@ def best_portfolios(
         "total_simulations": n_simulations,
         "data_source": "live",
     }
+
+
+@app.get("/api/tax-scores")
+def get_tax_scores():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ticker, name, provider, current_yield, tax_treatment_score FROM etfs ORDER BY ticker"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/tax-admin")
+def tax_admin_page():
+    tmpl = _env.get_template("tax-admin.html")
+    return HTMLResponse(tmpl.render())
+
+
+@app.post("/api/tax-scores")
+def update_tax_score(ticker: str = Form(...), score: str = Form("")):
+    if score == "" or score == "null":
+        # Clear the score
+        conn = get_db()
+        conn.execute(
+            "UPDATE etfs SET tax_treatment_score = NULL WHERE ticker = ?",
+            (ticker,)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "ticker": ticker, "score": None}
+    try:
+        score_val = max(0.0, min(1.0, float(score)))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Score must be a number 0.0-1.0 or empty to clear")
+    conn = get_db()
+    conn.execute(
+        "UPDATE etfs SET tax_treatment_score = ? WHERE ticker = ?",
+        (score_val, ticker)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "ticker": ticker, "score": score_val}
 
 
 @app.get("/api/stats")
