@@ -405,7 +405,7 @@ function renderTable() {
             <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)}</td>
             <td>${pct(e.total_return_3yr)}</td>
             <td>${pct(e.total_return_5yr)}</td>
-            <td class="yield-col">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
+            <td class="${e.available_income_10k != null && e.available_income_10k < 0 ? 'negative' : ''}">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
             <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${pct(e.nav_annual_change)}</td>
             <td>${fmt(e.beta_sp500)}</td>
             <td>${fmt(e.correlation_sp500)}</td>
