@@ -123,6 +123,27 @@ function initCollapsible() {
     const STORAGE_KEY = 'etf-dash-collapse';
     let saved;
     try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { saved = {}; }
+
+    // Hamburger sidebar toggle
+    const hamburger = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (hamburger && sidebar && overlay) {
+        function closeSidebar() {
+            sidebar.classList.remove('open');
+            overlay.classList.remove('open');
+        }
+        hamburger.onclick = () => {
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('open');
+        };
+        overlay.onclick = closeSidebar;
+        // Close sidebar when a nav link is clicked
+        sidebar.querySelectorAll('.nav-link').forEach(a => {
+            a.onclick = closeSidebar;
+        });
+    }
+
     document.querySelectorAll('section.scroll-section').forEach(section => {
         const h1 = section.querySelector('h1');
         if (!h1) return;

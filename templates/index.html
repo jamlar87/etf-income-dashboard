@@ -8,8 +8,9 @@
 <link rel="stylesheet" href="/static/css/style.v4.css">
 </head>
 <body>
-<nav class="sidebar">
+<nav class="sidebar" id="sidebar">
     <div class="sidebar-header">
+        <button id="sidebar-toggle" class="hamburger" aria-label="Toggle navigation">☰</button>
         <h2>📊 ETF Dashboard</h2>
         <p>NAV Erosion & Stress-Test Analysis</p>
     </div>
@@ -42,6 +43,7 @@
         <li><a href="#best" class="nav-link">🥇 Best Portfolios</a></li>
     </ul>
 </nav>
+<div id="sidebar-overlay"></div>
 
 <main class="content">
 
@@ -407,6 +409,6 @@
 
 </main>
 
-<script src="/static/js/app.v31.js" defer></script>
+<script src="/static/js/app.v32.js" defer></script>
 </body>
 </html>
