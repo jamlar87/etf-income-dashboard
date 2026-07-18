@@ -638,14 +638,54 @@ def leaderboard(
 
 
 @app.get("/api/beta-correlation")
-def beta_correlation(period: str = Query("1yr")):
+def beta_correlation(
+    period: str = Query("1yr"),
+    mode: str = Query("high_income"),
+    exclude_leveraged: bool = Query(True),
+    min_aum: float = Query(2000),
+    max_expense: float = Query(3.0),
+    min_yield: float = Query(0),
+    min_nav_change: float = Query(-10),
+    min_sharpe: float = Query(-10),
+):
     conn = get_db()
 
-    # Get all ETFs
-    rows = conn.execute("""
-        SELECT ticker, name, provider, beta_sp500, correlation_sp500, current_yield
-        FROM etfs WHERE beta_sp500 IS NOT NULL
-    """).fetchall()
+    if mode == "full":
+        conditions = ["(COALESCE(e.beta_sp500, u.beta_sp500) IS NOT NULL)"]
+        params = []
+        if exclude_leveraged:
+            conditions.append("(u.is_leveraged IS NULL OR u.is_leveraged = 0)")
+        if min_aum > 0:
+            conditions.append("(u.aum IS NOT NULL AND u.aum >= ?)")
+            params.append(min_aum)
+        if max_expense < 100:
+            conditions.append("(COALESCE(e.expense_ratio, u.expense_ratio) IS NULL OR COALESCE(e.expense_ratio, u.expense_ratio) <= ?)")
+            params.append(max_expense)
+        if min_yield > 0:
+            conditions.append("(COALESCE(e.current_yield, u.current_yield) IS NOT NULL AND COALESCE(e.current_yield, u.current_yield) >= ?)")
+            params.append(min_yield)
+        if min_nav_change > -100:
+            conditions.append("(COALESCE(e.nav_annual_change, u.nav_annual_change) IS NULL OR COALESCE(e.nav_annual_change, u.nav_annual_change) >= ?)")
+            params.append(min_nav_change)
+        if min_sharpe > -10:
+            conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
+            params.append(min_sharpe)
+        where = " AND ".join(conditions)
+        rows = conn.execute(f"""
+            SELECT u.ticker, COALESCE(e.name, u.name) AS name, COALESCE(e.provider, u.provider) AS provider,
+                   COALESCE(e.beta_sp500, u.beta_sp500) AS beta_sp500,
+                   COALESCE(e.correlation_sp500, u.correlation_sp500) AS correlation_sp500,
+                   COALESCE(e.current_yield, u.current_yield) AS current_yield
+            FROM etf_universe u
+            LEFT JOIN etfs e ON u.ticker = e.ticker
+            WHERE {where}
+        """, params).fetchall()
+    else:
+        # Get all ETFs from curated set
+        rows = conn.execute("""
+            SELECT ticker, name, provider, beta_sp500, correlation_sp500, current_yield
+            FROM etfs WHERE beta_sp500 IS NOT NULL
+        """).fetchall()
 
     # Determine month cutoff
     now = datetime.now()
