@@ -698,6 +698,9 @@ def simulate_portfolio(data: dict):
     initial = data.get("initial_investment", 25000)
     reinvest_pct = data.get("reinvest_pct", 50) / 100
     rebalance_freq = data.get("rebalance", "none")
+    apply_expenses = data.get("apply_expenses", True)
+    apply_taxes = data.get("apply_taxes", False)
+    tax_rate = data.get("tax_rate", 24) / 100
 
     tickers = [t["ticker"].upper() for t in tickers_weight]
     weights = {t["ticker"].upper(): t["weight"] / 100 for t in tickers_weight}
@@ -709,13 +712,21 @@ def simulate_portfolio(data: dict):
     if not price_data:
         raise HTTPException(400, "No historical data available for selected tickers")
 
-    # Get ETF names and current yields for display
+    # Get ETF names, expense ratios, and tax scores for display and adjustments
     conn2 = get_db()
     etf_info = {}
     for t in tickers:
-        row = conn2.execute("SELECT name, current_yield FROM etfs WHERE ticker = ?", (t,)).fetchone()
+        row = conn2.execute(
+            "SELECT name, current_yield, expense_ratio, tax_treatment_score FROM etfs WHERE ticker = ?",
+            (t,)
+        ).fetchone()
         if row:
-            etf_info[t] = {"name": row["name"], "current_yield": row["current_yield"]}
+            etf_info[t] = {
+                "name": row["name"],
+                "current_yield": row["current_yield"],
+                "expense_ratio": row["expense_ratio"] or 0,
+                "tax_score": row["tax_treatment_score"] or 0,
+            }
     conn2.close()
 
     months, start_date = _find_common_months(price_data, tickers)
@@ -774,6 +785,15 @@ def simulate_portfolio(data: dict):
 
             total_value += s * price
             div_income = s * div_per_share
+            
+            # Apply tax drag if toggled on
+            if apply_taxes:
+                info = etf_info.get(t, {})
+                tax_score = info.get("tax_score", 0)
+                ordinary_pct = max(0, 1 - tax_score)
+                tax_drag = div_income * ordinary_pct * tax_rate
+                div_income -= tax_drag
+            
             month_income += div_income
 
             # Reinvest dividends
@@ -846,6 +866,14 @@ def simulate_portfolio(data: dict):
         'monthly_income': monthly_income,
         'monthly_cash_received': monthly_cash_received,
         'monthly_no_reinvest': monthly_no_reinvest,
+        'etf_info': {
+            t: {
+                "name": info.get("name", t),
+                "expense_ratio": info.get("expense_ratio", 0),
+                "tax_score": info.get("tax_score", 0),
+                "current_yield": info.get("current_yield", 0),
+            } for t, info in etf_info.items()
+        },
     }
 
 

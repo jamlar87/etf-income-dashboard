@@ -1024,6 +1024,8 @@ async function simulatePortfolio() {
             reinvest_pct: parseInt(document.getElementById('pf-reinvest')?.value),
             rebalance: document.getElementById('pf-rebalance')?.value,
             period: document.getElementById('pf-period')?.value || 'max',
+            apply_taxes: document.getElementById('pf-apply-taxes')?.checked || false,
+            tax_rate: parseInt(document.getElementById('pf-tax-rate')?.value) || 24,
         };
         const r = await (await fetch(`${API}/portfolio/simulate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })).json();
         ['pf-final-val', 'pf-cash', 'pf-total-ret', 'pf-nav-chg'].forEach(id => {
@@ -1039,16 +1041,24 @@ async function simulatePortfolio() {
 
         // Portfolio info header
         const infoEl = document.getElementById('pf-info');
-        if (infoEl) {
-            const tickerList = portfolioEtfs.map(p => '<strong>' + p.ticker + '</strong>').join(', ');
+        if (infoEl && r.etf_info) {
+            const tickerInfo = portfolioEtfs.map(p => {
+                const info = r.etf_info[p.ticker] || {};
+                const er = info.expense_ratio ? info.expense_ratio.toFixed(2) + '%' : '--';
+                const tx = info.tax_score != null ? (info.tax_score * 100).toFixed(0) + '%' : '--';
+                return `<strong>${p.ticker}</strong> ER=${er} Tax=${tx}`;
+            }).join(' | ');
+            const adjInfo = [];
+            if (payload.apply_taxes) adjInfo.push(`tax adj @ ${payload.tax_rate}%`);
+            const adjStr = adjInfo.length ? ' (' + adjInfo.join(', ') + ')' : '';
             const start = new Date(r.start_date);
             const end = new Date(start);
             end.setMonth(end.getMonth() + r.months);
             const yrs = (r.months / 12).toFixed(1);
-            infoEl.innerHTML = 'ETF(s): ' + tickerList + ' | Period: ' +
+            infoEl.innerHTML = tickerInfo + ' | Period: ' +
                 start.toLocaleDateString('en-US', {year:'numeric',month:'2-digit',day:'2-digit'}) + ' — ' +
                 end.toLocaleDateString('en-US', {year:'numeric',month:'2-digit',day:'2-digit'}) +
-                ' (' + yrs + ' yrs) | Start date set by shortest-history ETF in portfolio';
+                ' (' + yrs + ' yrs)' + adjStr;
         }
 
         const labels = Array.from({ length: r.monthly_nav.length }, (_, i) => {

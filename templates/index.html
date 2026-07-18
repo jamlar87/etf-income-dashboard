@@ -322,6 +322,11 @@
                 <div class="pf-controls card">
                     <label>Investment: $<input type="number" id="pf-investment" value="25000" min="1000" step="1000"></label>
                     <label>Reinvest: <input type="range" id="pf-reinvest" value="50" min="0" max="100"> <span id="pf-reinvest-val">50%</span></label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:0.85em">
+                        <input type="checkbox" id="pf-apply-taxes"> Tax Adj
+                        <span class="info-tip" data-tip="Reduces dividend income based on each ETF's tax treatment score. Non-qualified/ordinary dividends taxed at your marginal rate.">ⓘ</span>
+                        <input type="number" id="pf-tax-rate" value="24" min="0" max="50" step="1" style="width:48px;padding:2px 4px">%
+                    </label>
                     <label>Period:
                         <select id="pf-period">
                             <option value="max">Max (common inception)</option>
@@ -420,6 +425,6 @@
 
 </main>
 
-<script src="/static/js/app.v39.js" defer></script>
+<script src="/static/js/app.v40.js" defer></script>
 </body>
 </html>
