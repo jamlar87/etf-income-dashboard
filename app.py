@@ -256,8 +256,8 @@ def list_universe(
                 COALESCE(e.distribution_coverage, u.distribution_coverage) AS distribution_coverage,
                 COALESCE(e.available_income_10k, u.available_income_10k) AS available_income_10k,
                 COALESCE(e.growth_10k, u.growth_10k) AS growth_10k,
-                u.tax_treatment_score,
-                u.income_stability_score,
+                COALESCE(e.tax_treatment_score, u.tax_treatment_score) AS tax_treatment_score,
+                COALESCE(e.income_stability_score, u.income_stability_score) AS income_stability_score,
                 u.source,
                 u.last_updated
             FROM etf_universe u
