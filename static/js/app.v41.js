@@ -185,6 +185,40 @@ if (document.readyState === 'loading') {
 } else {
     initDashboard();
 }
+
+// === UNIVERSE TOGGLE & FILTER WIRING ===
+document.addEventListener('DOMContentLoaded', () => {
+    const modeToggle = document.getElementById('universe-mode');
+    if (modeToggle) {
+        modeToggle.onchange = () => {
+            loadCompare();
+            loadBestPortfolios();
+        };
+    }
+    const applyBtn = document.getElementById('q-apply-btn');
+    if (applyBtn) applyBtn.onclick = loadCompare;
+    const resetBtn = document.getElementById('q-reset-btn');
+    if (resetBtn) {
+        resetBtn.onclick = () => {
+            const fields = [
+                { id: 'q-exclude-leveraged', val: true, type: 'checkbox' },
+                { id: 'q-min-aum', val: 2000 },
+                { id: 'q-max-expense', val: 3.0 },
+                { id: 'q-min-yield', val: 0 },
+                { id: 'q-min-nav', val: -10 },
+                { id: 'q-min-sharpe', val: -10 },
+            ];
+            fields.forEach(f => {
+                const el = document.getElementById(f.id);
+                if (!el) return;
+                if (f.type === 'checkbox') el.checked = f.val;
+                else el.value = f.val;
+            });
+            loadCompare();
+        };
+    }
+});
+
 // === OVERVIEW / LEADERBOARD ===
 async function loadOverview() {
     try {
@@ -339,10 +373,70 @@ async function loadOverview() {
 
 // === COMPARE TABLE ===
 let metricsChart = null;
+let _universeMode = 'full'; // 'full' or 'high_income'
+let _universeTotal = 0;
+
+function getUniverseMode() {
+    const cb = document.getElementById('universe-mode');
+    return cb && cb.checked ? 'full' : 'high_income';
+}
+
+function getQualityParams() {
+    return {
+        exclude_leveraged: document.getElementById('q-exclude-leveraged')?.checked ?? true,
+        min_aum: parseFloat(document.getElementById('q-min-aum')?.value) || 0,
+        max_expense: parseFloat(document.getElementById('q-max-expense')?.value) || 3.0,
+        min_yield: parseFloat(document.getElementById('q-min-yield')?.value) || 0,
+        min_nav_change: parseFloat(document.getElementById('q-min-nav')?.value) || -10,
+        min_sharpe: parseFloat(document.getElementById('q-min-sharpe')?.value) || -10,
+    };
+}
 
 async function loadCompare() {
     try {
-        if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
+        const mode = getUniverseMode();
+        _universeMode = mode;
+        
+        // Show/hide quality filters based on mode
+        const qf = document.getElementById('quality-filters');
+        if (qf) qf.style.display = mode === 'full' ? 'flex' : 'none';
+        
+        // Update section subtitle
+        const subtitle = document.querySelector('#compare h1 span');
+        if (subtitle) subtitle.textContent = mode === 'full' ? '(Full Universe)' : '(High Income)';
+
+        // Update sidebar label
+        const label = document.getElementById('universe-label');
+        if (label) label.textContent = mode === 'full' ? '🌐 Full Universe' : '💰 High Income Only';
+
+        let url;
+        if (mode === 'high_income') {
+            url = `${API}/etfs`;
+        } else {
+            const q = getQualityParams();
+            const params = new URLSearchParams({
+                mode: 'full',
+                sort_by: document.getElementById('sort-by')?.value || 'current_yield',
+                sort_dir: document.getElementById('sort-desc')?.checked ? 'desc' : 'asc',
+                limit: 1000,
+            });
+            for (const [k, v] of Object.entries(q)) params.set(k, v);
+            url = `${API}/universe?${params}`;
+        }
+
+        const resp = await fetch(url);
+        if (mode === 'high_income') {
+            allEtfs = await resp.json();
+            const badge = document.getElementById('universe-filter-badge');
+            if (badge) badge.textContent = `${allEtfs.length} high-income ETFs`;
+        } else {
+            const data = await resp.json();
+            allEtfs = data.etfs;
+            _universeTotal = data.filtered || data.total;
+            const badge = document.getElementById('universe-filter-badge');
+            if (badge) badge.textContent = `${data.filtered || data.total} of ${data.total} total ETFs (filters applied)`;
+        }
+
         const providers = [...new Set(allEtfs.map(e => e.provider))].sort();
         const pf = document.getElementById('provider-filter');
         if (pf) {
@@ -352,9 +446,9 @@ async function loadCompare() {
         const pf2 = document.getElementById('provider-filter');
         if (pf2) pf2.onchange = renderTable;
         const sb = document.getElementById('sort-by');
-        if (sb) sb.onchange = renderTable;
+        if (sb) sb.onchange = loadCompare;
         const sd = document.getElementById('sort-desc');
-        if (sd) sd.onchange = renderTable;
+        if (sd) sd.onchange = loadCompare;
 
         document.querySelectorAll('#metric-tabs .tab-btn').forEach(btn => {
             btn.onclick = () => {
@@ -392,23 +486,23 @@ function renderTable() {
         <tr>
             <td><strong>${e.ticker}</strong></td>
             <td title="${e.name}">${(e.name||'').length > 42 ? e.name.slice(0,40)+'…' : e.name}</td>
-            <td>${e.provider}</td>
+            <td>${e.provider || e.asset_class || '--'}</td>
             <td>${e.inception_date || '--'}</td>
             <td class="yield-col">${pct(e.current_yield)}</td>
-            <td>${pct(e.avg_yield_since_inception)}</td>
-            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
+            <td>${pct(e.avg_yield_since_inception) || '--'}</td>
+            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x') || '--'}</td>
             <td class="${(e.tax_treatment_score||0) >= 0.7 ? 'positive' : (e.tax_treatment_score||0) >= 0.3 ? '' : 'negative'}">${e.tax_treatment_score != null ? (e.tax_treatment_score*100).toFixed(0) + '%' : '--'}</td>
             <td class="${(e.income_stability_score||0) >= 0.65 ? 'positive' : (e.income_stability_score||0) >= 0.4 ? '' : 'negative'}">${e.income_stability_score != null ? (e.income_stability_score*100).toFixed(0) + '%' : '--'}</td>
             <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
-            <td>${fmt(e.sortino_ratio)}</td>
-            <td>${fmt(e.calmar_ratio)}</td>
+            <td>${fmt(e.sortino_ratio) || '--'}</td>
+            <td>${fmt(e.calmar_ratio) || '--'}</td>
             <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)}</td>
-            <td>${pct(e.total_return_3yr)}</td>
-            <td>${pct(e.total_return_5yr)}</td>
+            <td>${pct(e.total_return_3yr) || '--'}</td>
+            <td>${pct(e.total_return_5yr) || '--'}</td>
             <td class="${e.available_income_10k != null && e.available_income_10k < 0 ? 'negative' : ''}">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
             <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${pct(e.nav_annual_change)}</td>
-            <td>${fmt(e.beta_sp500)}</td>
-            <td>${fmt(e.correlation_sp500)}</td>
+            <td>${fmt(e.beta_sp500) || '--'}</td>
+            <td>${fmt(e.correlation_sp500) || '--'}</td>
         </tr>
     `).join('');
 

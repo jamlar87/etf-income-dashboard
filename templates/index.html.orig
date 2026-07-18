@@ -110,7 +110,7 @@
             <div class="quality-filters" id="quality-filters" style="display:none;padding:8px 12px;background:var(--card-bg);border-bottom:1px solid var(--border);font-size:0.8em;flex-wrap:wrap;gap:8px;align-items:center">
                 <span style="font-weight:600;margin-right:4px">Quality Filters:</span>
                 <label style="display:flex;align-items:center;gap:3px"><input type="checkbox" id="q-exclude-leveraged" checked> No Leverage</label>
-                <label>Min AUM: <input type="number" id="q-min-aum" value="2000" min="0" step="500" style="width:75px;padding:2px">M</label>
+                <label>Min AUM: <input type="number" id="q-min-aum" value="0" min="0" step="50" style="width:65px;padding:2px">M</label>
                 <label>Max ER: <input type="number" id="q-max-expense" value="3.0" min="0" max="10" step="0.25" style="width:55px;padding:2px">%</label>
                 <label>Min Yield: <input type="number" id="q-min-yield" value="0" min="0" max="50" step="1" style="width:55px;padding:2px">%</label>
                 <label>Min NAV: <input type="number" id="q-min-nav" value="-10" min="-100" max="100" step="5" style="width:55px;padding:2px">%</label>
@@ -444,6 +444,6 @@
 
 </main>
 
-<script src="/static/js/app.v41.js" defer></script>
+<script src="/static/js/app.v40.js" defer></script>
 </body>
 </html>

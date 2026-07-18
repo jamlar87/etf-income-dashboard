@@ -160,6 +160,95 @@ def list_etfs(
     return result
 
 
+@app.get("/api/universe")
+def list_universe(
+    mode: str = Query("full"),
+    exclude_leveraged: bool = Query(True),
+    min_nav_change: float = Query(-10),
+    min_aum: float = Query(2000),
+    max_expense: float = Query(3.0),
+    min_yield: float = Query(0),
+    min_return_1yr: float = Query(-100),
+    min_history_months: int = Query(0),
+    min_tax_score: float = Query(0),
+    min_sharpe: float = Query(-10),
+    sort_by: str = Query("current_yield"),
+    sort_dir: str = Query("desc"),
+    limit: int = Query(500),
+    offset: int = Query(0),
+):
+    conn = get_db()
+
+    conditions = []
+    params = []
+
+    if mode == "high_income":
+        conditions.append("u.is_high_income = 1")
+    else:
+        if exclude_leveraged:
+            conditions.append("(u.is_leveraged IS NULL OR u.is_leveraged = 0)")
+        if min_aum > 0:
+            conditions.append("(u.aum IS NOT NULL AND u.aum >= ?)")
+            params.append(min_aum)
+        if max_expense < 100:
+            conditions.append("(u.expense_ratio IS NULL OR u.expense_ratio <= ?)")
+            params.append(max_expense)
+        if min_yield > 0:
+            conditions.append("(u.current_yield IS NOT NULL AND u.current_yield >= ?)")
+            params.append(min_yield)
+        if min_return_1yr > -100:
+            conditions.append("(u.total_return_1yr IS NULL OR u.total_return_1yr >= ?)")
+            params.append(min_return_1yr)
+        if min_tax_score > 0:
+            conditions.append("(u.tax_treatment_score IS NOT NULL AND u.tax_treatment_score >= ?)")
+            params.append(min_tax_score)
+        if min_sharpe > -10:
+            conditions.append("(u.sharpe_ratio IS NULL OR u.sharpe_ratio >= ?)")
+            params.append(min_sharpe)
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    total_raw = conn.execute("SELECT COUNT(*) FROM etf_universe u WHERE is_active = 1").fetchone()[0]
+    count_sql = f"SELECT COUNT(*) FROM etf_universe u WHERE {where_clause}"
+    total_filtered = conn.execute(count_sql, params).fetchone()[0]
+
+    allowed_sorts = [
+        "current_yield", "expense_ratio", "total_return_1yr",
+        "nav_annual_change", "aum", "sharpe_ratio", "tax_treatment_score",
+        "income_stability_score", "ticker", "name", "asset_class",
+        "distribution_coverage", "beta_sp500",
+    ]
+    direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in allowed_sorts else "ORDER BY current_yield DESC"
+
+    query = f"""
+        SELECT * FROM etf_universe u
+        WHERE {where_clause}
+        {order_clause}
+        LIMIT ? OFFSET ?
+    """
+    rows = conn.execute(query, params + [limit, offset]).fetchall()
+    conn.close()
+
+    return {
+        "total": total_raw,
+        "filtered": total_filtered,
+        "returned": len(rows),
+        "mode": mode,
+        "filters": {
+            "exclude_leveraged": exclude_leveraged,
+            "min_nav_change": min_nav_change,
+            "min_aum": min_aum,
+            "max_expense": max_expense,
+            "min_yield": min_yield,
+            "min_return_1yr": min_return_1yr,
+            "min_history_months": min_history_months,
+            "min_sharpe": min_sharpe,
+        },
+        "etfs": [dict(r) for r in rows],
+    }
+
+
 @app.get("/api/etfs/newest-growth")
 def newest_growth(limit: int = Query(15)):
     """Return $10K growth data for the newest ETFs (for the reference growth chart)."""
