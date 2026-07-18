@@ -1,0 +1,15 @@
+[Unit]
+Description=ETF Income Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=james
+WorkingDirectory=/home/james/etf-dashboard
+ExecStart=/usr/bin/python3 /home/james/etf-dashboard/app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

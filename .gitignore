@@ -1,0 +1,25 @@
+# Database files (generated, stored on SlowDisk)
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hermes
+.hermes/
