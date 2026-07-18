@@ -67,7 +67,8 @@ def list_etfs(
         "total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr",
         "price_return_1yr", "beta_sp500", "correlation_sp500",
         "available_income_10k", "growth_10k", "nav_annual_change",
-        "inception_date", "ticker", "name", "provider"
+        "inception_date", "ticker", "name", "provider",
+        "tax_treatment_score", "income_stability_score"
     ]
     if sort_by in allowed_sorts:
         direction = "DESC" if sort_dir.lower() == "desc" else "ASC"

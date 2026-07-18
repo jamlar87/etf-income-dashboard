@@ -108,6 +108,8 @@
                         <option value="current_yield">Current Yield</option>
                         <option value="avg_yield_since_inception">Avg Yield (Inception)</option>
                         <option value="distribution_coverage">Distribution Coverage</option>
+                        <option value="tax_treatment_score">Tax Treatment</option>
+                        <option value="income_stability_score">Income Stability</option>
                         <option value="sharpe_ratio">Sharpe Ratio</option>
                         <option value="sortino_ratio">Sortino Ratio</option>
                         <option value="calmar_ratio">Calmar Ratio</option>
@@ -140,6 +142,12 @@
                             </th>
                             <th data-sort="distribution_coverage">Dist Cov
                                 <span class="info-tip" data-tip="Distribution coverage ratio = total return ÷ yield. Values between 1-2x are healthy. Below 1x means NAV erosion.">ⓘ</span>
+                            </th>
+                            <th data-sort="tax_treatment_score">Tax
+                                <span class="info-tip" data-tip="Tax treatment score (0-1). 1 = best (qualified dividends), 0 = worst (non-qualified). Manually curated from fund tax supplements + strategy classification.">ⓘ</span>
+                            </th>
+                            <th data-sort="income_stability_score">Stability
+                                <span class="info-tip" data-tip="Income stability score (0-1). Higher = more consistent monthly dividends. Computed from coefficient of variation of historical dividends.">ⓘ</span>
                             </th>
                             <th data-sort="sharpe_ratio">Sharpe
                                 <span class="info-tip" data-tip="Sharpe ratio: (return − risk-free rate) ÷ volatility. Measures risk-adjusted return since inception.">ⓘ</span>
@@ -412,6 +420,6 @@
 
 </main>
 
-<script src="/static/js/app.v35.js" defer></script>
+<script src="/static/js/app.v36.js" defer></script>
 </body>
 </html>

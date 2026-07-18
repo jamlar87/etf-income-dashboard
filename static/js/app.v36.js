@@ -397,6 +397,8 @@ function renderTable() {
             <td class="yield-col">${pct(e.current_yield)}</td>
             <td>${pct(e.avg_yield_since_inception)}</td>
             <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
+            <td class="${(e.tax_treatment_score||0) >= 0.7 ? 'positive' : (e.tax_treatment_score||0) >= 0.3 ? '' : 'negative'}">${e.tax_treatment_score != null ? (e.tax_treatment_score*100).toFixed(0) + '%' : '--'}</td>
+            <td class="${(e.income_stability_score||0) >= 0.65 ? 'positive' : (e.income_stability_score||0) >= 0.4 ? '' : 'negative'}">${e.income_stability_score != null ? (e.income_stability_score*100).toFixed(0) + '%' : '--'}</td>
             <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
             <td>${fmt(e.sortino_ratio)}</td>
             <td>${fmt(e.calmar_ratio)}</td>
