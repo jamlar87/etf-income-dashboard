@@ -1,0 +1,681 @@
+// ETF Dashboard JS — scroll-based layout (all sections visible)
+const API = '/api';
+
+let allEtfs = [];
+let pfChartNav = null;
+let pfChartIncome = null;
+let betaChart = null;
+let retChart = null;
+let portfolioEtfs = [];
+
+// === IntersectionObserver (wrapped for browser compat) ===
+let observer = null;
+try {
+    observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                const link = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+                if (link) link.classList.add('active');
+            }
+        });
+    }, { rootMargin: '-80px 0px -60% 0px' });
+} catch(e) {
+    console.warn('IntersectionObserver not supported:', e.message);
+}
+
+function watchSections() {
+    if (!observer) return;
+    document.querySelectorAll('.scroll-section').forEach(s => observer.observe(s));
+}
+
+// === Helpers ===
+function fmt(v, s='', d=2) {
+    if (v == null) return '--';
+    return Number(v).toFixed(d) + s;
+}
+
+function pct(v) { return fmt(v, '%'); }
+
+// === Status badge helper ===
+function updateStatus(msg, color) {
+    const badge = document.getElementById('status-badge');
+    if (badge) {
+        badge.textContent = msg;
+        badge.style.color = color || 'var(--orange)';
+    }
+}
+
+// === INIT — load all sections with timeout ===
+function initDashboard() {
+    console.log('Dashboard: starting data load...');
+    watchSections();
+
+    // Timeout: if data doesn't load in 15s, show error
+    const timeoutId = setTimeout(() => {
+        updateStatus('⏱ Timeout — some API calls hung', 'var(--red)');
+        console.error('Dashboard: promise.all timed out after 15s');
+    }, 15000);
+
+    Promise.all([
+        loadNewest(),
+        loadOverview(),
+        loadCompare(),
+        loadDistYield(),
+        loadDistCoverage(),
+        loadNavErosion(),
+        loadTotalReturn(),
+        loadSharpe(),
+        loadT12Perf(),
+        loadBetaChart(),
+        loadReturnChart(),
+        setupPortfolio(),
+        loadBestPortfolios(),
+    ]).then(() => {
+        clearTimeout(timeoutId);
+        updateStatus('✓ Data loaded — ' + (allEtfs.length || '?') + ' ETFs', 'var(--green)');
+        console.log('Dashboard: all data loaded successfully');
+    }).catch(err => {
+        clearTimeout(timeoutId);
+        const msg = '⚠ Error: ' + (err?.message || String(err)).slice(0, 80);
+        updateStatus(msg, 'var(--red)');
+        console.error('Dashboard: load error:', err);
+    });
+}
+
+// Try both approaches: DOMContentLoaded and direct (for deferred scripts)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    initDashboard();
+}
+
+// === NEWEST ADDITIONS ===
+let newestGrowthChart = null;
+
+async function loadNewest() {
+    try {
+        const resp = await fetch(`${API}/etfs/new?limit=50`);
+        const etfs = await resp.json();
+        const countEl = document.getElementById('new-count');
+        if (countEl) countEl.textContent = etfs.length;
+        const dateEl = document.getElementById('new-date');
+        if (dateEl) dateEl.textContent = 'Latest inception: ' + (etfs[0]?.inception_date || 'N/A');
+        const grid = document.getElementById('new-etfs-grid');
+        if (grid) {
+            grid.innerHTML = etfs.map(e => {
+                const arrow = e.total_return_1yr >= 0 ? '▲' : '▼';
+                const cls = e.total_return_1yr >= 0 ? 'positive' : 'negative';
+                return `<div class="na-card" title="${e.name}">
+                    <div class="na-ticker">${e.ticker}</div>
+                    <div class="na-yield">${pct(e.current_yield)}</div>
+                    <div class="na-return ${cls}">${arrow} ${pct(e.total_return_1yr)} <span class="na-ttm">T12M</span></div>
+                </div>`;
+            }).join('');
+        }
+        loadNewestGrowth();
+    } catch(e) {
+        console.error('loadNewest failed:', e);
+        throw e;
+    }
+}
+
+async function loadNewestGrowth() {
+    try {
+        const d = await (await fetch(`${API}/etfs/newest-growth?limit=10`)).json();
+        const tickers = d.tickers;
+        if (!tickers.length) return;
+        const canvas = document.getElementById('newest-growth-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (newestGrowthChart) newestGrowthChart.destroy();
+
+        const colors = ['#4fc3f7','#46b97e','#e74c5c','#f0a030','#4a90d9','#9b59b6','#1abc9c','#e67e22','#2ecc71','#e91e63'];
+
+        const datasets = [];
+        tickers.forEach((t, i) => {
+            const g = d.growth_data[t];
+            if (!g || !g.price_growth?.length) return;
+            datasets.push({
+                label: t + ' (Price)',
+                data: g.price_growth.map(p => p.value),
+                borderColor: colors[i % colors.length],
+                borderDash: [4, 4],
+                pointRadius: 0,
+                tension: 0.3,
+                fill: false,
+            });
+            if (g.total_growth?.length) {
+                datasets.push({
+                    label: t + ' (Total)',
+                    data: g.total_growth.map(p => p.value),
+                    borderColor: colors[i % colors.length],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: false,
+                });
+            }
+        });
+
+        const allDates = tickers.flatMap(t => (d.growth_data[t]?.price_growth || []).map(p => p.date));
+        const uniqueDates = [...new Set(allDates)].sort();
+
+        newestGrowthChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: uniqueDates, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#ccc', font: { size: 10 } } },
+                    title: { display: true, text: '$10,000 Investment Growth — Newest ETFs', color: '#e8eaed' }
+                },
+                scales: {
+                    y: { title: { display: true, text: 'Portfolio Value ($)', color: '#888' }, ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#1e2538' } },
+                    x: { ticks: { color: '#888', maxTicksLimit: 12, maxRotation: 45 }, grid: { color: '#1e2538' } },
+                }
+            }
+        });
+    } catch(e) {
+        console.warn('loadNewestGrowth (non-critical):', e.message);
+    }
+}
+
+// === OVERVIEW / LEADERBOARD ===
+async function loadOverview() {
+    try {
+        const s = await (await fetch(`${API}/stats`)).json();
+        const el = document.getElementById('os-etfs');
+        if (el) el.textContent = s.total_etfs;
+        const el2 = document.getElementById('os-avg-yield');
+        if (el2) el2.textContent = s.avg_yield + '%';
+
+        const lb = await (await fetch(`${API}/leaderboard`)).json();
+        const bestRet = lb.categories.best_total_return_1yr?.[0];
+        const bestSharpe = lb.categories.best_sharpe?.[0];
+        const el3 = document.getElementById('os-best-ret');
+        if (el3) el3.textContent = bestRet ? `${bestRet.ticker} ${bestRet.total_return_1yr}%` : '--';
+        const el4 = document.getElementById('os-best-sharpe');
+        if (el4) el4.textContent = bestSharpe ? `${bestSharpe.ticker} ${bestSharpe.sharpe_ratio}` : '--';
+
+        const grid = document.getElementById('leaderboard-grid');
+        if (!grid) return;
+
+        function renderCat(catKey, label) {
+            const entries = lb.categories[catKey]?.slice(0, 7) || [];
+            let html = `<div class="lb-category"><div class="lb-cat-header">${label}</div>`;
+            entries.forEach((e, i) => {
+                let val;
+                if (catKey.includes('yield')) val = pct(e.current_yield);
+                else if (catKey.includes('total_return')) val = pct(e.total_return_1yr || e.total_return_3yr);
+                else if (catKey.includes('sharpe')) val = fmt(e.sharpe_ratio);
+                else if (catKey.includes('dist_coverage')) val = fmt(e.distribution_coverage, 'x');
+                else if (catKey.includes('nav_growth')) val = pct(e.nav_annual_change);
+                else if (catKey.includes('sortino')) val = fmt(e.sortino_ratio);
+                else if (catKey.includes('calmar')) val = fmt(e.calmar_ratio);
+                else val = '--';
+                html += `<div class="lb-row">
+                    <span class="lb-rank">#${i+1}</span>
+                    <span class="lb-ticker">${e.ticker}</span>
+                    <span class="lb-name" title="${e.name}">${e.name}</span>
+                    <span class="lb-val">${val}</span>
+                    <span class="lb-legend ${e.tier}"></span>
+                </div>`;
+            });
+            html += `</div>`;
+            return html;
+        }
+
+        grid.innerHTML = renderCat('best_total_return_1yr', 'Best Total Return (TTM)')
+            + renderCat('best_sharpe', 'Best Sharpe Ratio')
+            + renderCat('best_dist_coverage', 'Best Distribution Coverage')
+            + renderCat('highest_yield', 'Highest Current Yield')
+            + renderCat('best_total_return_3yr', 'Best 3-Year Return')
+            + renderCat('best_sortino', 'Best Sortino Ratio')
+            + renderCat('best_nav_growth', 'Best NAV Growth')
+            + renderCat('best_calmar', 'Best Calmar Ratio');
+    } catch(e) {
+        console.error('loadOverview failed:', e);
+        throw e;
+    }
+}
+
+// === COMPARE TABLE ===
+let metricsChart = null;
+
+async function loadCompare() {
+    try {
+        if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
+        const providers = [...new Set(allEtfs.map(e => e.provider))].sort();
+        const pf = document.getElementById('provider-filter');
+        if (pf) {
+            pf.innerHTML = '<option value="">All</option>' + providers.map(p => `<option>${p}</option>`).join('');
+        }
+        renderTable();
+        const pf2 = document.getElementById('provider-filter');
+        if (pf2) pf2.onchange = renderTable;
+        const sb = document.getElementById('sort-by');
+        if (sb) sb.onchange = renderTable;
+        const sd = document.getElementById('sort-desc');
+        if (sd) sd.onchange = renderTable;
+
+        document.querySelectorAll('#metric-tabs .tab-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('#metric-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderMetricsChart(btn.dataset.metric);
+            };
+        });
+        renderMetricsChart('yield');
+    } catch(e) {
+        console.error('loadCompare failed:', e);
+        throw e;
+    }
+}
+
+function renderTable() {
+    const provider = document.getElementById('provider-filter')?.value || '';
+    const sortBy = document.getElementById('sort-by')?.value || 'current_yield';
+    const desc = document.getElementById('sort-desc')?.checked || true;
+    let etfs = provider ? allEtfs.filter(e => e.provider === provider) : [...allEtfs];
+    etfs.sort((a, b) => {
+        const va = a[sortBy] ?? (desc ? Infinity : -Infinity);
+        const vb = b[sortBy] ?? (desc ? Infinity : -Infinity);
+        return desc ? vb - va : va - vb;
+    });
+    document.querySelectorAll('#etf-table th').forEach(th => {
+        const k = th.dataset.sort;
+        if (!k) return;
+        th.innerHTML = th.innerHTML.replace(/ [▲▼]/, '');
+        if (k === sortBy) th.innerHTML += desc ? ' ▼' : ' ▲';
+    });
+    const tbody = document.querySelector('#etf-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = etfs.map(e => `
+        <tr>
+            <td><strong>${e.ticker}</strong></td>
+            <td title="${e.name}">${(e.name||'').length > 42 ? e.name.slice(0,40)+'…' : e.name}</td>
+            <td>${e.provider}</td>
+            <td>${e.inception_date || '--'}</td>
+            <td class="yield-col">${pct(e.current_yield)}</td>
+            <td>${pct(e.avg_yield_since_inception)}</td>
+            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
+            <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
+            <td>${fmt(e.sortino_ratio)}</td>
+            <td>${fmt(e.calmar_ratio)}</td>
+            <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)}</td>
+            <td>${pct(e.total_return_3yr)}</td>
+            <td>${pct(e.total_return_5yr)}</td>
+            <td class="yield-col">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
+            <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${pct(e.nav_annual_change)}</td>
+            <td>${fmt(e.beta_sp500)}</td>
+            <td>${fmt(e.correlation_sp500)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderMetricsChart(metric) {
+    if (!allEtfs.length) return;
+    const canvas = document.getElementById('metrics-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (metricsChart) metricsChart.destroy();
+
+    let labels, data, label;
+
+    switch (metric) {
+        case 'yield':
+            const byYield = [...allEtfs].filter(e => e.current_yield != null).sort((a,b) => b.current_yield - a.current_yield);
+            labels = byYield.slice(0, 15).map(e => e.ticker).reverse();
+            data = { current: byYield.slice(0, 15).map(e => e.current_yield).reverse(), avg: byYield.slice(0, 15).map(e => e.avg_yield_since_inception || 0).reverse() };
+            label = 'Current Yield %';
+            break;
+        case 'coverage':
+            const byCov = [...allEtfs].filter(e => e.distribution_coverage != null).sort((a,b) => b.distribution_coverage - a.distribution_coverage);
+            labels = byCov.slice(0, 15).map(e => e.ticker).reverse();
+            data = { coverage: byCov.slice(0, 15).map(e => e.distribution_coverage).reverse() };
+            label = 'Distribution Coverage (x)';
+            break;
+        case 'sharpe':
+            const bySh = [...allEtfs].filter(e => e.sharpe_ratio != null).sort((a,b) => b.sharpe_ratio - a.sharpe_ratio);
+            labels = bySh.slice(0, 15).map(e => e.ticker).reverse();
+            data = { sharpe: bySh.slice(0, 15).map(e => e.sharpe_ratio).reverse() };
+            label = 'Sharpe Ratio';
+            break;
+        case 'returns':
+            const byRet = [...allEtfs].filter(e => e.total_return_1yr != null).sort((a,b) => b.total_return_1yr - a.total_return_1yr);
+            labels = byRet.slice(0, 15).map(e => e.ticker).reverse();
+            data = { t12: byRet.slice(0, 15).map(e => e.total_return_1yr).reverse() };
+            label = 'Total Return T12M %';
+            break;
+        default: return;
+    }
+
+    const datasets = [];
+    if (data.current) datasets.push({ label: 'Current Yield', data: data.current, backgroundColor: '#4fc3f7', borderRadius: 2 });
+    if (data.avg) datasets.push({ label: 'Avg Yield (Inception)', data: data.avg, backgroundColor: '#46b97e', borderRadius: 2 });
+    if (data.coverage) datasets.push({ label: 'Distribution Coverage', data: data.coverage, backgroundColor: '#4a90d9', borderRadius: 2 });
+    if (data.sharpe) datasets.push({ label: 'Sharpe Ratio', data: data.sharpe, backgroundColor: '#f0a030', borderRadius: 2 });
+    if (data.t12) datasets.push({ label: 'T12M Total Return', data: data.t12, backgroundColor: '#46b97e', borderRadius: 2 });
+
+    metricsChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } }, title: { display: true, text: label, color: '#e8eaed' } },
+            scales: { x: { grid: { color: '#1e2538' }, ticks: { color: '#888' } }, y: { grid: { color: '#1e2538' }, ticks: { color: '#888', font: { size: 10 } } } }
+        }
+    });
+}
+
+// === DISTRIBUTION YIELD ===
+async function loadDistYield() {
+    try {
+        const etfs = await (await fetch(`${API}/etfs?sort_by=current_yield&sort_dir=desc`)).json();
+        const el = document.getElementById('dist-yield-content');
+        if (!el) return;
+        el.innerHTML = `<div class="quick-lists">
+            <div class="quick-list"><h3>🔝 Highest Current Yield</h3>
+                ${etfs.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker}</span><span class="yield-col">${pct(e.current_yield)}</span></div>`).join('')}
+            </div>
+            <div class="quick-list"><h3>⚠️ Biggest Yield Gap (Current vs Avg)</h3>
+                ${etfs.filter(e => e.avg_yield_since_inception).sort((a,b) => Math.abs(b.current_yield - b.avg_yield_since_inception) - Math.abs(a.current_yield - a.avg_yield_since_inception)).slice(0, 15).map(e =>
+                    `<div class="ql-item"><span>${e.ticker}</span><span class="${Math.abs(e.current_yield - e.avg_yield_since_inception) > 10 ? 'negative' : ''}">${pct(e.current_yield)} vs ${pct(e.avg_yield_since_inception)}</span></div>`
+                ).join('')}
+            </div>
+        </div>`;
+    } catch(e) { console.warn('loadDistYield:', e.message); }
+}
+
+// === DISTRIBUTION COVERAGE ===
+async function loadDistCoverage() {
+    try {
+        const best = await (await fetch(`${API}/etfs?sort_by=distribution_coverage&sort_dir=desc`)).json();
+        const worst = await (await fetch(`${API}/etfs?sort_by=distribution_coverage&sort_dir=asc`)).json();
+        const el = document.getElementById('dist-coverage-content');
+        if (!el) return;
+        el.innerHTML = `<div class="quick-lists">
+            <div class="quick-list"><h3>✅ Best Coverage (1-2x ideal)</h3>
+                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--green)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
+            </div>
+            <div class="quick-list"><h3>⚠️ Worst Coverage</h3>
+                ${worst.filter(e => e.distribution_coverage !== null).slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--red)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
+            </div>
+        </div>`;
+    } catch(e) { console.warn('loadDistCoverage:', e.message); }
+}
+
+// === NAV EROSION ===
+async function loadNavErosion() {
+    try {
+        const best = await (await fetch(`${API}/etfs?sort_by=nav_annual_change&sort_dir=desc`)).json();
+        const worst = await (await fetch(`${API}/etfs?sort_by=nav_annual_change&sort_dir=asc`)).json();
+        const el = document.getElementById('nav-erosion-content');
+        if (!el) return;
+        el.innerHTML = `<div class="quick-lists">
+            <div class="quick-list"><h3>📈 Strongest NAV Growth</h3>
+                ${best.filter(e => e.nav_annual_change !== null).slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--green)">${pct(e.nav_annual_change)}</span></div>`).join('')}
+            </div>
+            <div class="quick-list"><h3>📉 Worst NAV Erosion</h3>
+                ${worst.filter(e => e.nav_annual_change !== null).slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--red)">${pct(e.nav_annual_change)}</span></div>`).join('')}
+            </div>
+        </div>`;
+    } catch(e) { console.warn('loadNavErosion:', e.message); }
+}
+
+// === TOTAL RETURN ===
+async function loadTotalReturn() {
+    try {
+        const periods = [
+            { key: 'total_return_1yr', label: '1 Year' },
+            { key: 'total_return_3yr', label: '3 Year' },
+            { key: 'total_return_5yr', label: '5 Year' },
+            { key: 'total_return_10yr', label: '10 Year' },
+        ];
+        const all = await (await fetch(`${API}/etfs?sort_by=total_return_1yr&sort_dir=desc`)).json();
+        const el = document.getElementById('total-return-content');
+        if (!el) return;
+        let html = '<div class="quick-lists">';
+        periods.forEach(p => {
+            const sorted = [...all].filter(e => e[p.key] !== null).sort((a,b) => b[p.key] - a[p.key]);
+            html += `<div class="quick-list"><h3>Top 10 — ${p.label}</h3>
+                ${sorted.slice(0, 10).map(e => `<div class="ql-item"><span>${e.ticker}</span><span class="${e[p.key] >= 0 ? 'positive' : 'negative'}">${pct(e[p.key])}</span></div>`).join('')}
+            </div>`;
+        });
+        html += '</div>';
+        el.innerHTML = html;
+    } catch(e) { console.warn('loadTotalReturn:', e.message); }
+}
+
+// === SHARPE / SORTINO / CALMAR ===
+async function loadSharpe() {
+    try {
+        const all = await (await fetch(`${API}/etfs`)).json();
+        const bySharpe = [...all].filter(e => e.sharpe_ratio !== null).sort((a,b) => b.sharpe_ratio - a.sharpe_ratio);
+        const bySortino = [...all].filter(e => e.sortino_ratio !== null).sort((a,b) => b.sortino_ratio - a.sortino_ratio);
+        const byCalmar = [...all].filter(e => e.calmar_ratio !== null).sort((a,b) => b.calmar_ratio - a.calmar_ratio);
+        const el = document.getElementById('sharpe-content');
+        if (!el) return;
+        el.innerHTML = `<div class="quick-lists">
+            <div class="quick-list"><h3>🎯 Best Sharpe Ratio</h3>
+                ${bySharpe.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sharpe_ratio)}</span></div>`).join('')}
+            </div>
+            <div class="quick-list"><h3>🎯 Best Sortino Ratio</h3>
+                ${bySortino.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sortino_ratio)}</span></div>`).join('')}
+            </div>
+            <div class="quick-list" style="grid-column:1/3;margin-top:10px"><h3>🎯 Best Calmar Ratio</h3>
+                ${byCalmar.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.name.slice(0,40)}</span><span>${fmt(e.calmar_ratio)}</span></div>`).join('')}
+            </div>
+        </div>`;
+    } catch(e) { console.warn('loadSharpe:', e.message); }
+}
+
+// === TRAILING 12M PERFORMANCE ===
+async function loadT12Perf() {
+    try {
+        const all = await (await fetch(`${API}/etfs?sort_by=total_return_1yr&sort_dir=desc`)).json();
+        const best = all.filter(e => e.total_return_1yr !== null);
+        const worst = [...all].filter(e => e.total_return_1yr !== null).sort((a,b) => a.total_return_1yr - b.total_return_1yr);
+        const el = document.getElementById('t12-perf-content');
+        if (!el) return;
+        el.innerHTML = `<div class="quick-lists">
+            <div class="quick-list"><h3>🏆 Best T12 Total Return</h3>
+                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.provider}</span><span class="positive">${pct(e.total_return_1yr)}</span></div>`).join('')}
+            </div>
+            <div class="quick-list"><h3>⚠️ Worst T12 Total Return</h3>
+                ${worst.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.provider}</span><span class="negative">${pct(e.total_return_1yr)}</span></div>`).join('')}
+            </div>
+        </div>`;
+    } catch(e) { console.warn('loadT12Perf:', e.message); }
+}
+
+// === BETA CHART ===
+async function loadBetaChart() {
+    try {
+        const data = await (await fetch(`${API}/beta-correlation`)).json();
+        const canvas = document.getElementById('beta-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (betaChart) betaChart.destroy();
+        const points = data.points;
+        betaChart = new Chart(ctx, {
+            type: 'scatter',
+            data: { datasets: points.map(p => ({
+                label: p.ticker,
+                data: [{ x: p.beta, y: p.correlation }],
+                backgroundColor: p.yield > 20 ? '#e74c5c' : p.yield > 10 ? '#f0a030' : '#4a90d9',
+                borderColor: 'transparent', pointRadius: 5, pointHoverRadius: 8,
+            }))},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    tooltip: { callbacks: { label: (c) => `${points[c.datasetIndex].ticker}: β=${points[c.datasetIndex].beta}, ρ=${points[c.datasetIndex].correlation}, yield=${points[c.datasetIndex].yield}%` } },
+                    legend: { display: false },
+                    title: { display: true, text: 'Beta (X) vs Correlation (Y) with S&P 500', color: '#e8eaed' }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Beta', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
+                    y: { title: { display: true, text: 'Correlation', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' }, min: -0.2, max: 1.1 },
+                }
+            }
+        });
+    } catch(e) { console.warn('loadBetaChart:', e.message); }
+}
+
+// === RETURN SCATTER CHART ===
+async function loadReturnChart() {
+    try {
+        const all = await (await fetch(`${API}/etfs`)).json();
+        const chartData = all.filter(e => e.total_return_3yr !== null && e.sharpe_ratio !== null && e.current_yield !== null)
+            .map(e => ({ x: e.sharpe_ratio, y: e.total_return_3yr, ticker: e.ticker, yield: e.current_yield, provider: e.provider }));
+        const canvas = document.getElementById('return-scatter-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (retChart) retChart.destroy();
+        retChart = new Chart(ctx, {
+            type: 'scatter',
+            data: { datasets: [{ label: 'ETFs', data: chartData, backgroundColor: chartData.map(d => d.yield > 20 ? '#e74c5c' : d.yield > 10 ? '#f0a030' : '#4a90d9'), pointRadius: 5, pointHoverRadius: 8 }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { tooltip: { callbacks: { label: (c) => `${chartData[c.dataIndex].ticker}: 3yr ret=${chartData[c.dataIndex].y.toFixed(1)}%, sharpe=${chartData[c.dataIndex].x}, yield=${chartData[c.dataIndex].yield}%` } }, legend: { display: false }, title: { display: true, text: '3-Year Return vs Sharpe Ratio', color: '#e8eaed' } },
+                scales: { x: { title: { display: true, text: 'Sharpe Ratio', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } }, y: { title: { display: true, text: '3-Year Total Return %', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } } }
+            }
+        });
+    } catch(e) { console.warn('loadReturnChart:', e.message); }
+}
+
+// === PORTFOLIO BUILDER ===
+async function setupPortfolio() {
+    try {
+        if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
+        const si = document.getElementById('pf-search');
+        const dd = document.getElementById('pf-search-results');
+        if (!si || !dd) return;
+        si.oninput = () => {
+            const q = si.value.toLowerCase();
+            if (q.length < 1) { dd.classList.remove('show'); return; }
+            const matches = allEtfs.filter(e => e.ticker.toLowerCase().includes(q) || e.name.toLowerCase().includes(q)).slice(0, 8);
+            dd.innerHTML = matches.map(e => `<div class="pf-dropdown-item" data-t="${e.ticker}">
+                <span><span class="pf-dd-ticker">${e.ticker}</span> ${e.name.slice(0,28)}</span>
+                <span class="pf-dd-yield">${pct(e.current_yield)}</span></div>`).join('');
+            dd.classList.add('show');
+            dd.querySelectorAll('.pf-dropdown-item').forEach(item => {
+                item.onclick = () => {
+                    const t = item.dataset.t;
+                    if (portfolioEtfs.find(p => p.ticker === t)) return;
+                    const e = allEtfs.find(x => x.ticker === t);
+                    if (!e) return;
+                    portfolioEtfs.push({ ticker: e.ticker, name: e.name, weight: 100 / (portfolioEtfs.length + 1), yield: e.current_yield });
+                    const total = portfolioEtfs.reduce((s, p) => s + p.weight, 0);
+                    if (Math.abs(total - 100) > 0.1) portfolioEtfs[0].weight += 100 - total;
+                    renderPortfolio();
+                    dd.classList.remove('show');
+                    si.value = '';
+                };
+            });
+        };
+        si.onblur = () => setTimeout(() => dd.classList.remove('show'), 200);
+        const ri = document.getElementById('pf-reinvest');
+        if (ri) ri.oninput = function() { const v = document.getElementById('pf-reinvest-val'); if (v) v.textContent = this.value + '%'; };
+        const sim = document.getElementById('pf-simulate');
+        if (sim) sim.onclick = simulatePortfolio;
+        renderPortfolio();
+    } catch(e) { console.warn('setupPortfolio:', e.message); }
+}
+
+function renderPortfolio() {
+    const el = document.getElementById('pf-selected');
+    if (!el) return;
+    if (!portfolioEtfs.length) { el.innerHTML = '<p class="hint">Search and add ETFs to your portfolio (4-8 recommended)</p>'; return; }
+    el.innerHTML = portfolioEtfs.map((p, i) => `
+        <div class="pf-selected-item">
+            <span><strong>${p.ticker}</strong> <span style="color:var(--text-dim);font-size:0.78em">${p.name.slice(0,20)}</span></span>
+            <span><input type="number" class="weight-input" value="${Math.round(p.weight)}" min="0" max="100" onchange="window.updateWeight(${i},this.value)" style="width:48px;background:var(--card-bg);color:var(--text);border:1px solid var(--border);padding:2px 4px;border-radius:3px;text-align:right;font-size:0.85em">%
+            <button onclick="window.removeEtf(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:4px">✕</button></span>
+        </div>`).join('');
+}
+window.updateWeight = (i, v) => { portfolioEtfs[i].weight = parseInt(v) || 0; renderPortfolio(); };
+window.removeEtf = (i) => { portfolioEtfs.splice(i, 1); if (portfolioEtfs.length) { const e = Math.floor(100 / portfolioEtfs.length); portfolioEtfs.forEach(p => p.weight = e); portfolioEtfs[0].weight += 100 - e * portfolioEtfs.length; } renderPortfolio(); };
+
+async function simulatePortfolio() {
+    if (!portfolioEtfs.length) return;
+    try {
+        const payload = {
+            tickers: portfolioEtfs.map(p => ({ ticker: p.ticker, weight: Math.round(p.weight) })),
+            initial_investment: parseInt(document.getElementById('pf-investment')?.value) || 25000,
+            reinvest_pct: parseInt(document.getElementById('pf-reinvest')?.value),
+            rebalance: document.getElementById('pf-rebalance')?.value,
+        };
+        const r = await (await fetch(`${API}/portfolio/simulate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })).json();
+        ['pf-final-val', 'pf-cash', 'pf-total-ret', 'pf-nav-chg'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (id === 'pf-final-val') el.textContent = '$' + Number(r.final_value).toLocaleString();
+            else if (id === 'pf-cash') el.textContent = '$' + Number(r.total_cash_received).toLocaleString();
+            else if (id === 'pf-total-ret') el.textContent = r.total_return_pct + '%';
+            else if (id === 'pf-nav-chg') el.textContent = r.nav_change_pct + '%';
+        });
+        const res = document.querySelector('.pf-results');
+        if (res) res.style.display = 'block';
+
+        const labels = Array.from({ length: r.monthly_nav.length }, (_, i) => {
+            const d = new Date(r.start_date); d.setMonth(d.getMonth() + i + 1);
+            return d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        });
+
+        if (pfChartNav) pfChartNav.destroy();
+        const navCtx = document.getElementById('pf-nav-chart')?.getContext('2d');
+        if (navCtx) {
+            pfChartNav = new Chart(navCtx, {
+                type: 'line', data: { labels, datasets: [
+                    { label: 'Portfolio Value', data: r.monthly_nav, borderColor: '#4fc3f7', backgroundColor: 'rgba(79,195,247,0.08)', fill: true, tension: 0.3 },
+                    { label: 'Initial', data: Array(r.monthly_nav.length).fill(r.initial_investment), borderColor: '#888', borderDash: [5,5], pointRadius: 0 }
+                ]},
+                options: { responsive: true, plugins: { title: { display: true, text: 'Portfolio Value', color: '#e8eaed' } }, scales: { y: { ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#1e2538' } }, x: { ticks: { color: '#888', maxTicksLimit: 12 }, grid: { color: '#1e2538' } } } }
+            });
+        }
+
+        if (pfChartIncome) pfChartIncome.destroy();
+        const incCtx = document.getElementById('pf-income-chart')?.getContext('2d');
+        if (incCtx) {
+            pfChartIncome = new Chart(incCtx, {
+                type: 'bar', data: { labels, datasets: [{ label: 'Monthly Income', data: r.monthly_income, backgroundColor: '#46b97e', borderRadius: 2 }] },
+                options: { responsive: true, plugins: { title: { display: true, text: 'Monthly Income', color: '#e8eaed' } }, scales: { y: { ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#1e2538' } }, x: { ticks: { color: '#888', maxTicksLimit: 12 }, grid: { color: '#1e2538' } } } }
+            });
+        }
+    } catch(e) { console.error('simulatePortfolio:', e); }
+}
+
+// === BEST PORTFOLIOS ===
+async function loadBestPortfolios() {
+    try {
+        const period = document.getElementById('bp-period')?.value || '1yr';
+        const sortBy = document.getElementById('bp-sort')?.value || 'income';
+        const perEl = document.getElementById('bp-period');
+        const sortEl = document.getElementById('bp-sort');
+        if (perEl) perEl.onchange = loadBestPortfolios;
+        if (sortEl) sortEl.onchange = loadBestPortfolios;
+        const d = await (await fetch(`${API}/best-portfolios?period=${period}&sort_by=${sortBy}`)).json();
+        const el = document.getElementById('bp-eligible');
+        if (el) el.textContent = `${d.eligible_etfs} eligible ETFs | ${(d.total_simulations || 0).toLocaleString()} simulations`;
+        const table = document.getElementById('best-portfolios-table');
+        if (!table) return;
+        if (!d.portfolios?.length) {
+            table.innerHTML = '<p class="hint">Not enough ETFs with sufficient history.</p>';
+            return;
+        }
+        table.innerHTML = d.portfolios.map((p, i) => `
+            <div class="bp-row">
+                <div class="bp-rank">#${i+1}</div>
+                <div class="bp-etfs">${(p.etfs||[]).map(e => `<span class="bp-etf-tag ${e.highlight ? 'highlight' : ''}">${e.ticker} ${e.weight}%</span>`).join('')}</div>
+                <div class="bp-metrics">
+                    <div class="bp-metric"><span class="val">$${Number(p.monthly_income).toLocaleString()}/mo</span><span class="lbl">Income</span></div>
+                    <div class="bp-metric"><span class="val">${p.total_return}%</span><span class="lbl">Return</span></div>
+                    <div class="bp-metric"><span class="val">${p.nav_change}%</span><span class="lbl">NAV</span></div>
+                    <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe</span></div>
+                    <div class="bp-metric"><span class="val">${p.avg_yield}%</span><span class="lbl">Yield</span></div>
+                </div>
+            </div>`).join('');
+    } catch(e) { console.warn('loadBestPortfolios:', e.message); }
+}
