@@ -99,7 +99,8 @@ def main(batch_size=50, delay=0.3):
     print(f"Enriching {len(rows)} tickers...")
     updated = 0
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+    commit_counter = 0
+
     for ticker, scraped_name in rows:
         result = enrich_ticker(ticker)
         if result is None:
@@ -123,10 +124,16 @@ def main(batch_size=50, delay=0.3):
             sql = f"UPDATE etf_universe SET {', '.join(updates)} WHERE ticker = ?"
             conn.execute(sql, vals)
             updated += 1
+            commit_counter += 1
         
         print(f"  {ticker}: yield={result.get('current_yield', '?')}%, "
               f"ER={result.get('expense_ratio', '?')}%, "
               f"leveraged={'Y' if result.get('is_leveraged') else 'N'}")
+        
+        # Commit every 50 rows so partial progress survives crashes
+        if commit_counter >= 50:
+            conn.commit()
+            commit_counter = 0
         
         time.sleep(delay)
     
