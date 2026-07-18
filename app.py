@@ -191,38 +191,74 @@ def list_universe(
             conditions.append("(u.aum IS NOT NULL AND u.aum >= ?)")
             params.append(min_aum)
         if max_expense < 100:
-            conditions.append("(u.expense_ratio IS NULL OR u.expense_ratio <= ?)")
+            conditions.append("(COALESCE(e.expense_ratio, u.expense_ratio) IS NULL OR COALESCE(e.expense_ratio, u.expense_ratio) <= ?)")
             params.append(max_expense)
         if min_yield > 0:
-            conditions.append("(u.current_yield IS NOT NULL AND u.current_yield >= ?)")
+            conditions.append("(COALESCE(e.current_yield, u.current_yield) IS NOT NULL AND COALESCE(e.current_yield, u.current_yield) >= ?)")
             params.append(min_yield)
         if min_return_1yr > -100:
-            conditions.append("(u.total_return_1yr IS NULL OR u.total_return_1yr >= ?)")
+            conditions.append("(COALESCE(e.total_return_1yr, u.total_return_1yr) IS NULL OR COALESCE(e.total_return_1yr, u.total_return_1yr) >= ?)")
             params.append(min_return_1yr)
         if min_tax_score > 0:
             conditions.append("(u.tax_treatment_score IS NOT NULL AND u.tax_treatment_score >= ?)")
             params.append(min_tax_score)
         if min_sharpe > -10:
-            conditions.append("(u.sharpe_ratio IS NULL OR u.sharpe_ratio >= ?)")
+            conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
             params.append(min_sharpe)
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
     total_raw = conn.execute("SELECT COUNT(*) FROM etf_universe u WHERE is_active = 1").fetchone()[0]
-    count_sql = f"SELECT COUNT(*) FROM etf_universe u WHERE {where_clause}"
+    count_sql = f"SELECT COUNT(*) FROM etf_universe u LEFT JOIN etfs e ON u.ticker = e.ticker WHERE {where_clause}"
     total_filtered = conn.execute(count_sql, params).fetchone()[0]
 
     allowed_sorts = [
         "current_yield", "expense_ratio", "total_return_1yr",
         "nav_annual_change", "aum", "sharpe_ratio", "tax_treatment_score",
         "income_stability_score", "ticker", "name", "asset_class",
-        "distribution_coverage", "beta_sp500",
+        "distribution_coverage", "beta_sp500", "total_return_3yr",
+        "total_return_5yr", "total_return_10yr", "sortino_ratio", "calmar_ratio",
     ]
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in allowed_sorts else "ORDER BY current_yield DESC"
 
+    # LEFT JOIN with etfs table so high-income tickers get all their enriched fields
     query = f"""
-        SELECT * FROM etf_universe u
+        SELECT
+            u.ticker,
+            COALESCE(e.name, u.name) AS name,
+            u.asset_class,
+            u.aum,
+            u.is_high_income,
+            u.is_leveraged,
+            u.is_active,
+            COALESCE(e.provider, u.provider) AS provider,
+            COALESCE(e.category, u.category) AS category,
+            COALESCE(e.inception_date, u.inception_date) AS inception_date,
+            COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
+            COALESCE(e.current_yield, u.current_yield) AS current_yield,
+            u.nav_annual_change,
+            COALESCE(e.total_return_1yr, u.total_return_1yr) AS total_return_1yr,
+            COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
+            e.avg_yield_since_inception,
+            e.sharpe_t12,
+            e.sortino_ratio,
+            e.calmar_ratio,
+            e.total_return_3yr,
+            e.total_return_5yr,
+            e.total_return_10yr,
+            e.price_return_1yr,
+            e.beta_sp500,
+            e.correlation_sp500,
+            e.distribution_coverage,
+            e.available_income_10k,
+            e.growth_10k,
+            u.tax_treatment_score,
+            u.income_stability_score,
+            u.source,
+            u.last_updated
+        FROM etf_universe u
+        LEFT JOIN etfs e ON u.ticker = e.ticker
         WHERE {where_clause}
         {order_clause}
         LIMIT ? OFFSET ?
