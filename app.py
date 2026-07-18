@@ -745,6 +745,132 @@ def simulate_portfolio(data: dict):
     }
 
 
+# Cache for Monte Carlo results so multi-criteria queries don't re-run
+_best_pf_cache = {}
+
+def _run_monte_carlo(tickers, lookback_months, tax_scores):
+    """Run the full Monte Carlo simulation and return all portfolios with all metrics."""
+    conn = get_db()
+    price_data = _get_monthly_prices(conn, tickers)
+    conn.close()
+
+    n_simulations = min(3000, max(200, math.comb(len(tickers), 4) * 5))
+    random.seed(42)
+
+    results = []
+    for _ in range(n_simulations):
+        n_etfs = random.randint(4, min(8, len(tickers)))
+        selected = random.sample(tickers, n_etfs)
+        raw_weights = [random.uniform(5, 25) for _ in selected]
+        tw = sum(raw_weights)
+        weights = [w / tw for w in raw_weights]
+
+        initial_val = 10000
+        nav_values = []
+        monthly_incomes = []
+        total_cash_received = 0
+        shares = {}
+
+        # Find common months
+        common_months = None
+        for t in selected:
+            hist = price_data.get(t, [])
+            if not hist:
+                continue
+            ticker_months = {h["date"] for h in hist}
+            if common_months is None:
+                common_months = ticker_months
+            else:
+                common_months &= ticker_months
+
+        if not common_months:
+            continue
+        common_months = sorted(common_months)
+        if len(common_months) < 2:
+            continue
+        if len(common_months) > lookback_months:
+            common_months = common_months[-lookback_months:]
+
+        # Month 0: allocate
+        start_m = common_months[0]
+        for i, t in enumerate(selected):
+            entry = next((h for h in price_data.get(t, []) if h["date"] == start_m), None)
+            if entry and entry["close"] > 0:
+                shares[t] = (initial_val * weights[i]) / entry["close"]
+            else:
+                shares[t] = 0
+
+        # Month 1+: collect dividends
+        for m in common_months[1:]:
+            m_nav, m_income = 0, 0
+            for t in selected:
+                entry = next((h for h in price_data.get(t, []) if h["date"] == m), None)
+                if not entry or shares.get(t, 0) == 0:
+                    continue
+                m_nav += shares[t] * entry["close"]
+                m_income += shares[t] * entry["dividend"]
+            total_cash_received += m_income
+            nav_values.append(m_nav)
+            monthly_incomes.append(m_income)
+
+        if not nav_values:
+            continue
+
+        final_nav = nav_values[-1]
+        num_months = len(nav_values)
+        avg_monthly_income = total_cash_received / num_months if num_months > 0 else 0
+        total_return_pct = ((final_nav + total_cash_received) / initial_val - 1) * 100
+        nav_change_pct = (final_nav / initial_val - 1) * 100
+        available_income_per_10k = round(avg_monthly_income * 12, 2)
+        avg_yield_pct = (avg_monthly_income * 12 / initial_val) * 100
+
+        # Sharpe
+        portfolio_monthly_rets = []
+        for i in range(num_months):
+            total_val = nav_values[i] + sum(monthly_incomes[:i+1])
+            prev_total = initial_val if i == 0 else nav_values[i-1] + sum(monthly_incomes[:i])
+            if prev_total > 0:
+                portfolio_monthly_rets.append((total_val - prev_total) / prev_total)
+
+        if len(portfolio_monthly_rets) >= 2:
+            avg_mret = sum(portfolio_monthly_rets) / len(portfolio_monthly_rets)
+            std_mret = (sum((r - avg_mret) ** 2 for r in portfolio_monthly_rets) / len(portfolio_monthly_rets)) ** 0.5
+            sharpe = (avg_mret * 12 - 0.045) / (std_mret * (12 ** 0.5)) if std_mret > 0 else 0
+        else:
+            sharpe = 0
+
+        # Income stability: downside-only
+        non_zero = [i for i in monthly_incomes if i > 0]
+        if len(non_zero) >= 4:
+            changes = [(non_zero[i] - non_zero[i-1]) / non_zero[i-1] * 100 for i in range(1, len(non_zero))]
+            neg = [abs(c) for c in changes if c < 0]
+            cut_freq = len(neg) / len(changes) if changes else 0
+            avg_depth = sum(neg) / len(neg) if neg else 0
+            penalty = (cut_freq ** 0.4) * (avg_depth / 25)
+            income_stability = round(max(0.05, min(1, 1 - penalty)), 3)
+        else:
+            income_stability = 0.5
+
+        # Tax treatment
+        scored = [tax_scores.get(t) for t in selected if tax_scores.get(t) is not None]
+        tax_treatment = round(sum(scored) / len(scored), 3) if scored else 0.5
+
+        results.append({
+            "etfs": [{"ticker": selected[i], "weight": round(weights[i] * 100, 1)} for i in range(len(selected))],
+            "avg_yield": round(avg_yield_pct, 1),
+            "total_return": round(total_return_pct, 1),
+            "nav_change": round(nav_change_pct, 1),
+            "sharpe": round(sharpe, 2),
+            "monthly_income": round(avg_monthly_income, 2),
+            "available_income_per_10k": available_income_per_10k,
+            "num_etfs": len(selected),
+            "income_stability": income_stability,
+            "tax_treatment": tax_treatment,
+        })
+
+    return results
+
+
 @app.get("/api/best-portfolios")
 def best_portfolios(
     period: str = Query("1yr"),
@@ -806,135 +932,12 @@ def best_portfolios(
     if len(recent_tickers) < 4:
         return {"portfolios": [], "eligible_etfs": len(recent_tickers), "period": period}
 
-    # Run Monte Carlo — buy-and-hold simulation matching original dashboard
-    n_simulations = min(3000, math.comb(len(recent_tickers), 4) * 5)
-    n_simulations = max(n_simulations, 200)
-    random.seed(42)
-
-    all_portfolios = []
-
-    for _ in range(n_simulations):
-        n_etfs = random.randint(4, min(8, len(recent_tickers)))
-        selected = random.sample(recent_tickers, n_etfs)
-        raw_weights = [random.uniform(5, 25) for _ in selected]
-        tw = sum(raw_weights)
-        weights = [w / tw for w in raw_weights]
-
-        initial_val = 10000
-        buy_price = {}  # ticker -> first month close
-        nav_values = []   # monthly NAV (price only)
-        monthly_incomes = []
-        total_cash_received = 0
-        shares = {}
-
-        # Find common months across selected tickers
-        common_months = None
-        for t in selected:
-            hist = price_data.get(t, [])
-            if not hist:
-                continue
-            ticker_months = {h["date"] for h in hist}
-            if common_months is None:
-                common_months = ticker_months
-            else:
-                common_months &= ticker_months
-
-        if not common_months:
-            continue
-
-        common_months = sorted(common_months)
-        if len(common_months) < 2:
-            continue
-
-        # Trim to lookback period
-        if len(common_months) > lookback_months:
-            common_months = common_months[-lookback_months:]
-
-        # Month 0: allocate and buy shares
-        start_m = common_months[0]
-        for i, t in enumerate(selected):
-            entry = next((h for h in price_data.get(t, []) if h["date"] == start_m), None)
-            if entry and entry["close"] > 0:
-                alloc = initial_val * weights[i]
-                shares[t] = alloc / entry["close"]
-                buy_price[t] = entry["close"]
-            else:
-                shares[t] = 0
-
-        # Month 1+ : collect dividends, track NAV
-        for m in common_months[1:]:
-            m_nav = 0
-            m_income = 0
-            for t in selected:
-                entry = next((h for h in price_data.get(t, []) if h["date"] == m), None)
-                if not entry or shares.get(t, 0) == 0:
-                    continue
-                m_nav += shares[t] * entry["close"]
-                m_income += shares[t] * entry["dividend"]
-            total_cash_received += m_income
-            nav_values.append(m_nav)
-            monthly_incomes.append(m_income)
-
-        if not nav_values:
-            continue
-
-        final_nav = nav_values[-1]
-        num_months = len(nav_values)
-
-        # Total return = (NAV + cash received) / initial - 1
-        avg_monthly_income = total_cash_received / num_months if num_months > 0 else 0
-        total_return_pct = ((final_nav + total_cash_received) / initial_val - 1) * 100
-        nav_change_pct = (final_nav / initial_val - 1) * 100
-        available_income_per_10k = round(avg_monthly_income * 12, 2)  # annualized avg income per $10K
-        avg_yield_pct = (avg_monthly_income * 12 / initial_val) * 100
-
-        # Sharpe ratio from monthly total returns
-        portfolio_monthly_rets = []
-        for i in range(num_months):
-            total_val = nav_values[i] + sum(monthly_incomes[:i+1])
-            if i == 0:
-                prev_total = initial_val
-            else:
-                prev_total = nav_values[i-1] + sum(monthly_incomes[:i])
-            if prev_total > 0:
-                m_ret = (total_val - prev_total) / prev_total
-                portfolio_monthly_rets.append(m_ret)
-
-        if len(portfolio_monthly_rets) >= 2:
-            avg_mret = sum(portfolio_monthly_rets) / len(portfolio_monthly_rets)
-            std_mret = (sum((r - avg_mret) ** 2 for r in portfolio_monthly_rets) / len(portfolio_monthly_rets)) ** 0.5
-            sharpe = (avg_mret * 12 - 0.045) / (std_mret * (12 ** 0.5)) if std_mret > 0 else 0
-        else:
-            sharpe = 0
-
-        # Income stability: downside-only deviation (drops penalized, growth ignored)
-        non_zero = [i for i in monthly_incomes if i > 0]
-        if len(non_zero) >= 4:
-            changes = [(non_zero[i] - non_zero[i-1]) / non_zero[i-1] * 100 for i in range(1, len(non_zero))]
-            neg = [abs(c) for c in changes if c < 0]
-            cut_freq = len(neg) / len(changes) if changes else 0
-            avg_depth = sum(neg) / len(neg) if neg else 0
-            penalty = (cut_freq ** 0.4) * (avg_depth / 25)
-            income_stability = round(max(0.05, min(1, 1 - penalty)), 3)
-        else:
-            income_stability = 0.5
-
-        # Tax treatment: weighted average of each ETF's manual tax_treatment_score (0-1)
-        scored = [tax_scores.get(t) for t in selected if tax_scores.get(t) is not None]
-        tax_treatment = round(sum(scored) / len(scored), 3) if scored else 0.5
-
-        all_portfolios.append({
-            "etfs": [{"ticker": selected[i], "weight": round(weights[i] * 100, 1)} for i in range(len(selected))],
-            "avg_yield": round(avg_yield_pct, 1),
-            "total_return": round(total_return_pct, 1),
-            "nav_change": round(nav_change_pct, 1),
-            "sharpe": round(sharpe, 2),
-            "monthly_income": round(avg_monthly_income, 2),
-            "available_income_per_10k": available_income_per_10k,
-            "num_etfs": len(selected),
-            "income_stability": income_stability,
-            "tax_treatment": round(tax_treatment, 3) if 'tax_treatment' in dir() else 0,
-        })
+    # If already cached for this period, reuse
+    cache_key = f"best_portfolios_{lookback_months}"
+    if cache_key not in _best_pf_cache:
+        _best_pf_cache[cache_key] = _run_monte_carlo(recent_tickers, lookback_months, tax_scores)
+    all_portfolios = _best_pf_cache[cache_key]
+    n_simulations = len(all_portfolios)
 
     sort_keys = {
         "income": "monthly_income",
