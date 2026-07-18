@@ -1,40 +1,12 @@
-// ETF Dashboard JS — aligned to reference design
+// ETF Dashboard JS — scroll-based layout (all sections visible)
 const API = '/api';
 
 let allEtfs = [];
 let pfChartNav = null;
 let pfChartIncome = null;
 let betaChart = null;
+let retChart = null;
 let portfolioEtfs = [];
-
-// === Navigation ===
-document.querySelectorAll('.nav-link').forEach(link => {
-    link.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-        const id = link.dataset.section;
-        document.getElementById(id).classList.add('active');
-        loadSection(id);
-    });
-});
-
-function loadSection(id) {
-    if (id === 'overview') loadOverview();
-    if (id === 'compare') loadCompare();
-    if (id === 'newest') loadNewest();
-    if (id === 'dist-yield') loadDistYield();
-    if (id === 'dist-coverage') loadDistCoverage();
-    if (id === 'nav-erosion') loadNavErosion();
-    if (id === 'total-return') loadTotalReturn();
-    if (id === 'sharpe') loadSharpe();
-    if (id === 't12-perf') loadT12Perf();
-    if (id === 'beta') loadBetaChart();
-    if (id === 'portfolio') setupPortfolio();
-    if (id === 'best') loadBestPortfolios();
-    if (id === 'return-chart') loadReturnChart();
-}
 
 // === Helpers ===
 function fmt(v, s='', d=2) {
@@ -44,14 +16,47 @@ function fmt(v, s='', d=2) {
 
 function pct(v) { return fmt(v, '%'); }
 
-// === NEWEST ADDITIONS (styled to match reference) ===
+// === IntersectionObserver — highlights current nav link on scroll ===
+const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            const link = document.querySelector(`.nav-link[href="#${entry.target.id}"]`);
+            if (link) link.classList.add('active');
+        }
+    });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+// Register all sections for observer after DOM ready
+function watchSections() {
+    document.querySelectorAll('.scroll-section').forEach(s => observer.observe(s));
+}
+
+// === INIT — load all sections ===
+document.addEventListener('DOMContentLoaded', () => {
+    watchSections();
+    loadNewest();
+    loadOverview();
+    loadCompare();
+    loadDistYield();
+    loadDistCoverage();
+    loadNavErosion();
+    loadTotalReturn();
+    loadSharpe();
+    loadT12Perf();
+    loadBetaChart();
+    loadReturnChart();
+    setupPortfolio();
+    loadBestPortfolios();
+});
+
+// === NEWEST ADDITIONS ===
 async function loadNewest() {
     const resp = await fetch(`${API}/etfs/new?limit=50`);
     const etfs = await resp.json();
     document.getElementById('new-count').textContent = etfs.length;
     document.getElementById('new-date').textContent = 'Latest inception: ' + (etfs[0]?.inception_date || 'N/A');
-    const grid = document.getElementById('new-etfs-grid');
-    grid.innerHTML = etfs.map(e => {
+    document.getElementById('new-etfs-grid').innerHTML = etfs.map(e => {
         const arrow = e.total_return_1yr >= 0 ? '▲' : '▼';
         const cls = e.total_return_1yr >= 0 ? 'positive' : 'negative';
         return `<div class="na-card" title="${e.name}">
@@ -64,12 +69,10 @@ async function loadNewest() {
 
 // === OVERVIEW / LEADERBOARD ===
 async function loadOverview() {
-    // Stats
     const s = await (await fetch(`${API}/stats`)).json();
     document.getElementById('os-etfs').textContent = s.total_etfs;
     document.getElementById('os-avg-yield').textContent = s.avg_yield + '%';
 
-    // Best return and sharpe come from leaderboard
     const lb = await (await fetch(`${API}/leaderboard`)).json();
     const bestRet = lb.categories.best_total_return_1yr?.[0];
     const bestSharpe = lb.categories.best_sharpe?.[0];
@@ -78,24 +81,20 @@ async function loadOverview() {
     document.getElementById('os-best-sharpe').textContent = bestSharpe
         ? `${bestSharpe.ticker} ${bestSharpe.sharpe_ratio}` : '--';
 
-    // Leaderboard categories (top 7 per category, 2 columns: Best TR + Best Sharpe)
     const grid = document.getElementById('leaderboard-grid');
-    const catLabels = {
-        'best_total_return_1yr': 'Best Total Return (TTM)',
-        'best_sharpe': 'Best Sharpe Ratio (TTM)',
-        'total_return_1yr': 'Trailing 12 Months (TTM)',
-    };
 
     function renderCat(catKey, label) {
         const entries = lb.categories[catKey]?.slice(0, 7) || [];
-        let html = `<div class="lb-category">
-            <div class="lb-cat-header">${label}</div>`;
+        let html = `<div class="lb-category"><div class="lb-cat-header">${label}</div>`;
         entries.forEach((e, i) => {
             let val;
             if (catKey.includes('yield')) val = pct(e.current_yield);
-            else if (catKey.includes('total_return')) val = pct(e.total_return_1yr);
-            else if (catKey.includes('sharpe')) val = e.sharpe_ratio;
+            else if (catKey.includes('total_return')) val = pct(e.total_return_1yr || e.total_return_3yr);
+            else if (catKey.includes('sharpe')) val = fmt(e.sharpe_ratio);
             else if (catKey.includes('dist_coverage')) val = fmt(e.distribution_coverage, 'x');
+            else if (catKey.includes('nav_growth')) val = pct(e.nav_annual_change);
+            else if (catKey.includes('sortino')) val = fmt(e.sortino_ratio);
+            else if (catKey.includes('calmar')) val = fmt(e.calmar_ratio);
             else val = '--';
             html += `<div class="lb-row">
                 <span class="lb-rank">#${i+1}</span>
@@ -119,6 +118,57 @@ async function loadOverview() {
         + renderCat('best_calmar', 'Best Calmar Ratio');
 }
 
+// === COMPARE TABLE ===
+async function loadCompare() {
+    if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
+    const providers = [...new Set(allEtfs.map(e => e.provider))].sort();
+    document.getElementById('provider-filter').innerHTML = '<option value="">All</option>'
+        + providers.map(p => `<option>${p}</option>`).join('');
+    renderTable();
+    document.getElementById('provider-filter').onchange = renderTable;
+    document.getElementById('sort-by').onchange = renderTable;
+    document.getElementById('sort-desc').onchange = renderTable;
+}
+
+function renderTable() {
+    const provider = document.getElementById('provider-filter').value;
+    const sortBy = document.getElementById('sort-by').value;
+    const desc = document.getElementById('sort-desc').checked;
+    let etfs = provider ? allEtfs.filter(e => e.provider === provider) : [...allEtfs];
+    etfs.sort((a, b) => {
+        const va = a[sortBy] ?? (desc ? Infinity : -Infinity);
+        const vb = b[sortBy] ?? (desc ? Infinity : -Infinity);
+        return desc ? vb - va : va - vb;
+    });
+    document.querySelectorAll('#etf-table th').forEach(th => {
+        const k = th.dataset.sort;
+        if (!k) return;
+        th.innerHTML = th.innerHTML.replace(/ [▲▼]/, '');
+        if (k === sortBy) th.innerHTML += desc ? ' ▼' : ' ▲';
+    });
+    document.querySelector('#etf-table tbody').innerHTML = etfs.map(e => `
+        <tr>
+            <td><strong>${e.ticker}</strong></td>
+            <td title="${e.name}">${e.name.length > 42 ? e.name.slice(0,40)+'…' : e.name}</td>
+            <td>${e.provider}</td>
+            <td>${e.inception_date || '--'}</td>
+            <td class="yield-col">${pct(e.current_yield)}</td>
+            <td>${pct(e.avg_yield_since_inception)}</td>
+            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
+            <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
+            <td>${fmt(e.sortino_ratio)}</td>
+            <td>${fmt(e.calmar_ratio)}</td>
+            <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)}</td>
+            <td>${pct(e.total_return_3yr)}</td>
+            <td>${pct(e.total_return_5yr)}</td>
+            <td class="yield-col">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
+            <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${pct(e.nav_annual_change)}</td>
+            <td>${fmt(e.beta_sp500)}</td>
+            <td>${fmt(e.correlation_sp500)}</td>
+        </tr>
+    `).join('');
+}
+
 // === DISTRIBUTION YIELD ===
 async function loadDistYield() {
     const etfs = await (await fetch(`${API}/etfs?sort_by=current_yield&sort_dir=desc`)).json();
@@ -127,7 +177,7 @@ async function loadDistYield() {
             <div class="quick-list"><h3>🔝 Highest Current Yield</h3>
                 ${etfs.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker}</span><span class="yield-col">${pct(e.current_yield)}</span></div>`).join('')}
             </div>
-            <div class="quick-list"><h3>⚠️ Yield Gap (Current vs Avg)</h3>
+            <div class="quick-list"><h3>⚠️ Biggest Yield Gap (Current vs Avg)</h3>
                 ${etfs.filter(e => e.avg_yield_since_inception).sort((a,b) => Math.abs(b.current_yield - b.avg_yield_since_inception) - Math.abs(a.current_yield - a.avg_yield_since_inception)).slice(0, 15).map(e =>
                     `<div class="ql-item"><span>${e.ticker}</span><span class="${Math.abs(e.current_yield - e.avg_yield_since_inception) > 10 ? 'negative' : ''}">${pct(e.current_yield)} vs ${pct(e.avg_yield_since_inception)}</span></div>`
                 ).join('')}
@@ -142,7 +192,7 @@ async function loadDistCoverage() {
     document.getElementById('dist-coverage-content').innerHTML = `
         <div class="quick-lists">
             <div class="quick-list"><h3>✅ Best Coverage (1-2x ideal)</h3>
-                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${e.current_yield}%)</span><span style="color:var(--green)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
+                ${best.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--green)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>⚠️ Worst Coverage (&lt;0 = NAV erosion)</h3>
                 ${worst.filter(e => e.distribution_coverage !== null).slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} (${pct(e.current_yield)})</span><span style="color:var(--red)">${fmt(e.distribution_coverage, 'x')}</span></div>`).join('')}
@@ -191,19 +241,16 @@ async function loadSharpe() {
     const bySharpe = [...all].filter(e => e.sharpe_ratio !== null).sort((a,b) => b.sharpe_ratio - a.sharpe_ratio);
     const bySortino = [...all].filter(e => e.sortino_ratio !== null).sort((a,b) => b.sortino_ratio - a.sortino_ratio);
     const byCalmar = [...all].filter(e => e.calmar_ratio !== null).sort((a,b) => b.calmar_ratio - a.calmar_ratio);
-
     document.getElementById('sharpe-content').innerHTML = `
         <div class="quick-lists">
             <div class="quick-list"><h3>🎯 Best Sharpe Ratio</h3>
-                ${bySharpe.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${e.sharpe_ratio}</span></div>`).join('')}
+                ${bySharpe.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sharpe_ratio)}</span></div>`).join('')}
             </div>
             <div class="quick-list"><h3>🎯 Best Sortino Ratio</h3>
-                ${bySortino.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${e.sortino_ratio}</span></div>`).join('')}
+                ${bySortino.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker}</span><span>${fmt(e.sortino_ratio)}</span></div>`).join('')}
             </div>
             <div class="quick-list" style="grid-column:1/3;margin-top:10px"><h3>🎯 Best Calmar Ratio</h3>
-                ${byCalmar.slice(0, 12).map(e =>
-                    `<div class="ql-item"><span>${e.ticker} — ${e.name.slice(0,40)}</span><span>${e.calmar_ratio}</span></div>`
-                ).join('')}
+                ${byCalmar.slice(0, 12).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.name.slice(0,40)}</span><span>${fmt(e.calmar_ratio)}</span></div>`).join('')}
             </div>
         </div>`;
 }
@@ -213,7 +260,6 @@ async function loadT12Perf() {
     const all = await (await fetch(`${API}/etfs?sort_by=total_return_1yr&sort_dir=desc`)).json();
     const best = all.filter(e => e.total_return_1yr !== null);
     const worst = [...all].filter(e => e.total_return_1yr !== null).sort((a,b) => a.total_return_1yr - b.total_return_1yr);
-
     document.getElementById('t12-perf-content').innerHTML = `
         <div class="quick-lists">
             <div class="quick-list"><h3>🏆 Best T12 Total Return</h3>
@@ -223,104 +269,6 @@ async function loadT12Perf() {
                 ${worst.slice(0, 15).map(e => `<div class="ql-item"><span>${e.ticker} — ${e.provider}</span><span class="negative">${pct(e.total_return_1yr)}</span></div>`).join('')}
             </div>
         </div>`;
-}
-
-// === RETURN SCATTER CHART ===
-async function loadReturnChart() {
-    const all = await (await fetch(`${API}/etfs`)).json();
-    const chartData = all
-        .filter(e => e.total_return_3yr !== null && e.sharpe_ratio !== null && e.current_yield !== null)
-        .map(e => ({
-            x: e.sharpe_ratio,
-            y: e.total_return_3yr,
-            ticker: e.ticker,
-            yield: e.current_yield,
-            provider: e.provider,
-        }));
-
-    const ctx = document.getElementById('return-scatter-chart').getContext('2d');
-    if (window.retChart) window.retChart.destroy();
-
-    window.retChart = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-            datasets: [{
-                label: 'ETFs',
-                data: chartData,
-                backgroundColor: chartData.map(d => d.yield > 20 ? '#e74c5c' : d.yield > 10 ? '#f0a030' : '#4a90d9'),
-                pointRadius: 5,
-                pointHoverRadius: 8,
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: (c) => {
-                            const d = chartData[c.dataIndex];
-                            return `${d.ticker}: 3yr ret=${d.y.toFixed(1)}%, sharpe=${d.x}, yield=${d.yield}%`;
-                        }
-                    }
-                },
-                legend: { display: false },
-                title: { display: true, text: '3-Year Return vs Sharpe Ratio', color: '#e8eaed' }
-            },
-            scales: {
-                x: { title: { display: true, text: 'Sharpe Ratio', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
-                y: { title: { display: true, text: '3-Year Total Return %', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
-            }
-        }
-    });
-}
-
-// === COMPARE TABLE ===
-async function loadCompare() {
-    if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
-    const providers = [...new Set(allEtfs.map(e => e.provider))].sort();
-    document.getElementById('provider-filter').innerHTML = '<option value="">All</option>'
-        + providers.map(p => `<option>${p}</option>`).join('');
-    renderTable();
-    document.getElementById('provider-filter').onchange = renderTable;
-    document.getElementById('sort-by').onchange = renderTable;
-    document.getElementById('sort-desc').onchange = renderTable;
-}
-
-function renderTable() {
-    const provider = document.getElementById('provider-filter').value;
-    const sortBy = document.getElementById('sort-by').value;
-    const desc = document.getElementById('sort-desc').checked;
-    let etfs = provider ? allEtfs.filter(e => e.provider === provider) : [...allEtfs];
-    etfs.sort((a, b) => {
-        const va = a[sortBy] ?? (desc ? Infinity : -Infinity);
-        const vb = b[sortBy] ?? (desc ? Infinity : -Infinity);
-        return desc ? vb - va : va - vb;
-    });
-    document.querySelectorAll('#etf-table th').forEach(th => {
-        const k = th.dataset.sort;
-        if (!k) return;
-        th.innerHTML = th.innerHTML.replace(/ [▲▼]/, '');
-        if (k === sortBy) th.innerHTML += desc ? ' ▼' : ' ▲';
-    });
-    document.querySelector('#etf-table tbody').innerHTML = etfs.map(e => `
-        <tr>
-            <td><strong>${e.ticker}</strong></td>
-            <td title="${e.name}">${e.name.length > 42 ? e.name.slice(0,40)+'…' : e.name}</td>
-            <td>${e.provider}</td>
-            <td class="yield-col">${pct(e.current_yield)}</td>
-            <td>${pct(e.avg_yield_since_inception)}</td>
-            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
-            <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
-            <td>${fmt(e.sortino_ratio)}</td>
-            <td>${fmt(e.calmar_ratio)}</td>
-            <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)}</td>
-            <td class="yield-col">${e.available_income_10k != null ? '$' + Number(e.available_income_10k).toLocaleString() : '--'}</td>
-            <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${pct(e.nav_annual_change)}</td>
-            <td>${fmt(e.beta_sp500)}</td>
-            <td>${fmt(e.correlation_sp500)}</td>
-        </tr>
-    `).join('');
 }
 
 // === BETA CHART ===
@@ -349,6 +297,45 @@ async function loadBetaChart() {
             scales: {
                 x: { title: { display: true, text: 'Beta', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
                 y: { title: { display: true, text: 'Correlation', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' }, min: -0.2, max: 1.1 },
+            }
+        }
+    });
+}
+
+// === RETURN SCATTER CHART ===
+async function loadReturnChart() {
+    const all = await (await fetch(`${API}/etfs`)).json();
+    const chartData = all
+        .filter(e => e.total_return_3yr !== null && e.sharpe_ratio !== null && e.current_yield !== null)
+        .map(e => ({
+            x: e.sharpe_ratio,
+            y: e.total_return_3yr,
+            ticker: e.ticker,
+            yield: e.current_yield,
+            provider: e.provider,
+        }));
+    const ctx = document.getElementById('return-scatter-chart').getContext('2d');
+    if (retChart) retChart.destroy();
+    retChart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'ETFs',
+                data: chartData,
+                backgroundColor: chartData.map(d => d.yield > 20 ? '#e74c5c' : d.yield > 10 ? '#f0a030' : '#4a90d9'),
+                pointRadius: 5, pointHoverRadius: 8,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                tooltip: { callbacks: { label: (c) => `${chartData[c.dataIndex].ticker}: 3yr ret=${chartData[c.dataIndex].y.toFixed(1)}%, sharpe=${chartData[c.dataIndex].x}, yield=${chartData[c.dataIndex].yield}%` } },
+                legend: { display: false },
+                title: { display: true, text: '3-Year Return vs Sharpe Ratio', color: '#e8eaed' }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Sharpe Ratio', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
+                y: { title: { display: true, text: '3-Year Total Return %', color: '#888' }, grid: { color: '#1e2538' }, ticks: { color: '#888' } },
             }
         }
     });
@@ -396,13 +383,12 @@ function renderPortfolio() {
     el.innerHTML = portfolioEtfs.map((p, i) => `
         <div class="pf-selected-item">
             <span><strong>${p.ticker}</strong> <span style="color:var(--text-dim);font-size:0.78em">${p.name.slice(0,20)}</span></span>
-            <span><input type="number" class="weight-input" value="${Math.round(p.weight)}" min="0" max="100" onchange="updateWeight(${i},this.value)" style="width:48px;background:var(--card-bg);color:var(--text);border:1px solid var(--border);padding:2px 4px;border-radius:3px;text-align:right;font-size:0.85em">%
-            <button onclick="removeEtf(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:4px">✕</button></span>
+            <span><input type="number" class="weight-input" value="${Math.round(p.weight)}" min="0" max="100" onchange="window.updateWeight(${i},this.value)" style="width:48px;background:var(--card-bg);color:var(--text);border:1px solid var(--border);padding:2px 4px;border-radius:3px;text-align:right;font-size:0.85em">%
+            <button onclick="window.removeEtf(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:4px">✕</button></span>
         </div>`).join('');
 }
-
-function updateWeight(i, v) { portfolioEtfs[i].weight = parseInt(v) || 0; renderPortfolio(); }
-function removeEtf(i) { portfolioEtfs.splice(i, 1); if (portfolioEtfs.length) { const e = Math.floor(100 / portfolioEtfs.length); portfolioEtfs.forEach(p => p.weight = e); portfolioEtfs[0].weight += 100 - e * portfolioEtfs.length; } renderPortfolio(); }
+window.updateWeight = (i, v) => { portfolioEtfs[i].weight = parseInt(v) || 0; renderPortfolio(); };
+window.removeEtf = (i) => { portfolioEtfs.splice(i, 1); if (portfolioEtfs.length) { const e = Math.floor(100 / portfolioEtfs.length); portfolioEtfs.forEach(p => p.weight = e); portfolioEtfs[0].weight += 100 - e * portfolioEtfs.length; } renderPortfolio(); };
 
 async function simulatePortfolio() {
     if (!portfolioEtfs.length) return;
@@ -450,7 +436,7 @@ async function loadBestPortfolios() {
     document.getElementById('bp-period').onchange = loadBestPortfolios;
     document.getElementById('bp-sort').onchange = loadBestPortfolios;
     const d = await (await fetch(`${API}/best-portfolios?period=${period}&sort_by=${sortBy}`)).json();
-    document.getElementById('bp-eligible').textContent = `${d.eligible_etfs} eligible ETFs`;
+    document.getElementById('bp-eligible').textContent = `${d.eligible_etfs} eligible ETFs | ${d.total_simulations.toLocaleString()} simulations`;
     if (!d.portfolios?.length) {
         document.getElementById('best-portfolios-table').innerHTML = '<p class="hint">Not enough ETFs with sufficient history.</p>';
         return;
@@ -468,6 +454,3 @@ async function loadBestPortfolios() {
             </div>
         </div>`).join('');
 }
-
-// === INIT ===
-loadNewest();

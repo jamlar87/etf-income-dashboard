@@ -88,10 +88,15 @@ body {
     padding: 28px 35px;
     flex: 1;
     max-width: 1500px;
+    scroll-behavior: smooth;
 }
 
-.section { display: none; }
-.section.active { display: block; }
+/* Sections — scrolling layout (all visible, no show/hide) */
+.scroll-section {
+    scroll-margin-top: 20px;
+    margin-bottom: 36px;
+    padding: 0;
+}
 
 h1 {
     font-size: 1.5em;
