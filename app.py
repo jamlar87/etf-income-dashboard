@@ -463,6 +463,10 @@ def beta_correlation(period: str = Query("1yr")):
         conn.close()
         return {"points": [], "period": period}
 
+    # Compute live yields while conn is still open
+    live = _compute_live_metrics(conn)
+    live_map = {tick: v["current_yield"] for tick, v in live.items()}
+
     placeholders = ",".join("?" * len(all_tickers))
     price_rows = conn.execute(
         f"SELECT ticker, date, close, dividend FROM price_history WHERE ticker IN ({placeholders}) AND date >= ? ORDER BY ticker, date",
@@ -502,6 +506,10 @@ def beta_correlation(period: str = Query("1yr")):
                 "beta": r["beta_sp500"], "correlation": r["correlation_sp500"],
                 "yield": r["current_yield"],
             })
+        # Apply live yields on early return too
+        for p in points:
+            if p["ticker"] in live_map:
+                p["yield"] = live_map[p["ticker"]]
         return {"points": points, "period": period}
 
     # Helper: compute beta and correlation between two return series
@@ -534,10 +542,7 @@ def beta_correlation(period: str = Query("1yr")):
             "yield": r["current_yield"],
         })
     
-    # Apply live yields
-    live = _compute_live_metrics(conn)
-    conn.close()
-    live_map = {tick: v["current_yield"] for tick, v in live.items()}
+    # Apply live yields (live_map already computed above)
     for p in points:
         if p["ticker"] in live_map:
             p["yield"] = live_map[p["ticker"]]
