@@ -473,3 +473,86 @@ td.yield-col { color: var(--accent2); font-weight: 600; }
 .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
 .hint { color: var(--text-dim); font-size: 0.82em; font-style: italic; }
+
+/* Tooltip info icon */
+.info-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--card-bg);
+    color: var(--text-dim);
+    font-size: 0.65em;
+    font-weight: 700;
+    cursor: help;
+    position: relative;
+    vertical-align: middle;
+    margin-left: 6px;
+    border: 1px solid var(--border);
+    line-height: 1;
+    transition: background 0.15s, color 0.15s;
+    font-style: normal;
+}
+.info-tip:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.info-tip::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 400;
+    white-space: normal;
+    width: 300px;
+    max-width: 80vw;
+    text-align: left;
+    line-height: 1.5;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    z-index: 100;
+    border: 1px solid #333;
+}
+.info-tip::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #1a1a2e;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 100;
+}
+.info-tip:hover::after,
+.info-tip:hover::before {
+    opacity: 1;
+}
+/* Tooltip on table headers */
+th .info-tip {
+    width: 14px;
+    height: 14px;
+    font-size: 0.55em;
+    margin-left: 3px;
+}
+th .info-tip::after {
+    bottom: calc(100% + 6px);
+    font-size: 0.72rem;
+    width: 240px;
+}
+th .info-tip::before {
+    bottom: calc(100% + 0px);
+}

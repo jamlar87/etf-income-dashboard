@@ -1131,12 +1131,12 @@ async function loadBestPortfolios() {
             <div class="bp-row" style="cursor:pointer" data-pf='${encodeURIComponent(JSON.stringify(p.etfs || []))}'>
                 <div class="bp-rank">#${i+1}</div>
                 <div class="bp-metrics">
-                    <div class="bp-metric"><span class="val">$${Number(p.available_income_per_10k || p.monthly_income * 12 / 10).toLocaleString()}</span><span class="lbl">Avail Inc/10k</span></div>
-                    <div class="bp-metric"><span class="val">${p.avg_yield}%</span><span class="lbl">Avg Yield</span></div>
-                    <div class="bp-metric"><span class="val">${p.nav_change >= 0 ? '+' : ''}${p.nav_change}%</span><span class="lbl">NAV Change</span></div>
-                    <div class="bp-metric"><span class="val">${p.total_return >= 0 ? '+' : ''}${p.total_return}%</span><span class="lbl">Total Return</span></div>
-                    <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe</span></div>
-                    <div class="bp-metric"><span class="val">${p.num_etfs || (p.etfs||[]).length}</span><span class="lbl">#ETFs</span></div>
+                    <div class="bp-metric"><span class="val">$${Number(p.available_income_per_10k || p.monthly_income * 12 / 10).toLocaleString()}</span><span class="lbl">Avail Inc/10k <span class="info-tip" data-tip="Annualized average cash income per $10,000 invested. Higher is better for income seekers.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${p.avg_yield}%</span><span class="lbl">Avg Yield <span class="info-tip" data-tip="Average portfolio yield over the full backtest period. Based on actual dividends received.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${p.nav_change >= 0 ? '+' : ''}${p.nav_change}%</span><span class="lbl">NAV Change <span class="info-tip" data-tip="Price-only change in portfolio value. Excludes dividends. Negative = the portfolio principal shrank.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${p.total_return >= 0 ? '+' : ''}${p.total_return}%</span><span class="lbl">Total Return <span class="info-tip" data-tip="Total portfolio return including both NAV change and dividends received. Real-world performance.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${p.sharpe}</span><span class="lbl">Sharpe <span class="info-tip" data-tip="Risk-adjusted return. Higher = better return per unit of volatility. Above 1 is good.">ⓘ</span></span></div>
+                    <div class="bp-metric"><span class="val">${p.num_etfs || (p.etfs||[]).length}</span><span class="lbl">#ETFs <span class="info-tip" data-tip="Number of ETFs in this portfolio combination (randomized between 4-8).">ⓘ</span></span></div>
                 </div>
                 <div class="bp-etfs">${(p.etfs||[]).map(e => '<span class="bp-etf-tag' + (e.highlight ? ' highlight' : '') + '">' + e.ticker + ' ' + e.weight + '%</span>').join('')}</div>
             </div>`).join('');

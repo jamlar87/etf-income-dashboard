@@ -47,7 +47,9 @@
 
     <!-- OVERVIEW / LEADERBOARD -->
     <section id="overview" class="scroll-section">
-        <h1>High-Yield ETF Dashboard</h1>
+        <h1>High-Yield ETF Dashboard
+            <span class="info-tip" data-tip="Top 7 ETFs per category — yield, distribution coverage, Sharpe ratio, total returns, and NAV growth. Green = appears in 4+ categories, Red = 3 categories, Blue = 2 categories.">ⓘ</span>
+        </h1>
         <p class="subtitle">NAV Erosion & Stress-Test Analysis</p>
 
         <div id="top-stats" class="stats-cards">
@@ -75,7 +77,9 @@
 
         <!-- LEADERBOARD -->
         <div id="leaderboard-section" class="card">
-            <h2>🏆 Leaderboard</h2>
+            <h2>🏆 Leaderboard
+                <span class="info-tip" data-tip="Top 7 ETFs per category based on live price &amp; dividend data. ETFs appearing in 4+ categories are the most balanced high-yield picks.">ⓘ</span>
+            </h2>
             <p class="card-desc">Rankings computed live from current price & dividend data — Top 7 per category
                 <span style="margin-left:15px"><span class="lb-legend green"></span> 4+ categories</span>
                 <span style="margin-left:10px"><span class="lb-legend red"></span> 3 categories</span>
@@ -87,7 +91,9 @@
 
     <!-- ETF COMPARE TABLE -->
     <section id="compare" class="scroll-section">
-        <h1>📊 ETF Comparison Table</h1>
+        <h1>📊 ETF Comparison Table
+            <span class="info-tip" data-tip="Sortable table of all tracked ETFs. Click column headers to sort. Compare yield, Sharpe ratio, total returns, beta, correlation, and available income per $10K across providers.">ⓘ</span>
+        </h1>
         <div class="card">
             <div class="controls">
                 <label>Provider:
@@ -122,19 +128,45 @@
                             <th data-sort="name">Name</th>
                             <th data-sort="provider">Provider</th>
                             <th data-sort="inception_date">Inception</th>
-                            <th data-sort="current_yield">Yield</th>
-                            <th data-sort="avg_yield_since_inception">Avg Yield</th>
-                            <th data-sort="distribution_coverage">Dist Cov</th>
-                            <th data-sort="sharpe_ratio">Sharpe</th>
-                            <th data-sort="sortino_ratio">Sortino</th>
-                            <th data-sort="calmar_ratio">Calmar</th>
-                            <th data-sort="total_return_1yr">T12 Ret</th>
-                            <th data-sort="total_return_3yr">3Y Ret</th>
-                            <th data-sort="total_return_5yr">5Y Ret</th>
-                            <th data-sort="available_income_10k">Inc/$10K</th>
-                            <th data-sort="nav_annual_change">NAV Chg</th>
-                            <th data-sort="beta_sp500">Beta</th>
-                            <th data-sort="correlation_sp500">Corr</th>
+                            <th data-sort="current_yield">Yield
+                                <span class="info-tip" data-tip="Current 12-month trailing distribution yield. Calculated as total dividends over trailing 12 months ÷ current price.">ⓘ</span>
+                            </th>
+                            <th data-sort="avg_yield_since_inception">Avg Yield
+                                <span class="info-tip" data-tip="Average yield since the ETF's inception. Large gap from current yield may indicate a dividend trap.">ⓘ</span>
+                            </th>
+                            <th data-sort="distribution_coverage">Dist Cov
+                                <span class="info-tip" data-tip="Distribution coverage ratio = total return ÷ yield. Values between 1-2x are healthy. Below 1x means NAV erosion.">ⓘ</span>
+                            </th>
+                            <th data-sort="sharpe_ratio">Sharpe
+                                <span class="info-tip" data-tip="Sharpe ratio: (return − risk-free rate) ÷ volatility. Measures risk-adjusted return since inception.">ⓘ</span>
+                            </th>
+                            <th data-sort="sortino_ratio">Sortino
+                                <span class="info-tip" data-tip="Like Sharpe but only penalizes downside volatility. Preferred metric for income investors.">ⓘ</span>
+                            </th>
+                            <th data-sort="calmar_ratio">Calmar
+                                <span class="info-tip" data-tip="Calmar ratio: annualized return ÷ maximum drawdown. Higher = better recovery from peak losses.">ⓘ</span>
+                            </th>
+                            <th data-sort="total_return_1yr">T12 Ret
+                                <span class="info-tip" data-tip="Trailing 12-month total return including reinvested dividends.">ⓘ</span>
+                            </th>
+                            <th data-sort="total_return_3yr">3Y Ret
+                                <span class="info-tip" data-tip="3-year annualized total return including reinvested dividends.">ⓘ</span>
+                            </th>
+                            <th data-sort="total_return_5yr">5Y Ret
+                                <span class="info-tip" data-tip="5-year annualized total return including reinvested dividends.">ⓘ</span>
+                            </th>
+                            <th data-sort="available_income_10k">Inc/$10K
+                                <span class="info-tip" data-tip="Available income per $10,000 invested — annualized average cash distributions, adjusted for NAV erosion.">ⓘ</span>
+                            </th>
+                            <th data-sort="nav_annual_change">NAV Chg
+                                <span class="info-tip" data-tip="Annualized NAV change (price only, excludes dividends). Negative = the fund's assets are shrinking.">ⓘ</span>
+                            </th>
+                            <th data-sort="beta_sp500">Beta
+                                <span class="info-tip" data-tip="Beta vs S&P 500. Measures magnitude of price movement relative to the market. Above 1 = more volatile than the market.">ⓘ</span>
+                            </th>
+                            <th data-sort="correlation_sp500">Corr
+                                <span class="info-tip" data-tip="Correlation vs S&P 500. Measures directional alignment. Lower = better diversification away from market returns.">ⓘ</span>
+                            </th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -144,7 +176,9 @@
 
         <!-- INVESTMENT GROWTH CHART -->
         <div class="card">
-            <h2>📈 $10,000 Investment Growth</h2>
+            <h2>📈 $10,000 Investment Growth
+                <span class="info-tip" data-tip="Price return only (no dividends). Normalized to $10K at the earliest common date across all tickers. Shows pure NAV appreciation or erosion over time.">ⓘ</span>
+            </h2>
             <p style="color:var(--text-dim);font-size:0.82em">Price return (no dividends) — normalized to $10K at earliest date. All tickers shown.</p>
             <div class="chart-container" style="height:1200px;overflow-y:auto;position:relative">
                 <div id="growth-status" style="text-align:center;padding:20px;color:var(--orange);font-size:0.85em">⏳ Loading growth chart...</div>
@@ -154,7 +188,9 @@
 
         <!-- Key Metrics Comparison Chart -->
         <div class="card">
-            <h2>📊 Key Metrics Comparison</h2>
+            <h2>📊 Key Metrics Comparison
+                <span class="info-tip" data-tip="Compare yield, distribution coverage, Sharpe ratio, or total returns across all ETFs. Use the tabs to switch between metrics. Each bar represents one ETF.">ⓘ</span>
+            </h2>
             <div class="tab-bar" id="metric-tabs">
                 <button class="tab-btn active" data-metric="yield">Yield</button>
                 <button class="tab-btn" data-metric="coverage">Distribution Coverage</button>
@@ -169,49 +205,63 @@
 
     <!-- DISTRIBUTION YIELD -->
     <section id="dist-yield" class="scroll-section">
-        <h1>💵 Distribution Yield</h1>
+        <h1>💵 Distribution Yield
+            <span class="info-tip" data-tip="Current 12-month trailing yield vs average yield since inception. Large gaps between current and average yield may signal a dividend trap — where NAV erosion inflated the apparent yield.">ⓘ</span>
+        </h1>
         <p class="subtitle">Current yield vs average yield since inception — large gaps signal dividend traps</p>
         <div id="dist-yield-content" class="card"></div>
     </section>
 
     <!-- DISTRIBUTION COVERAGE -->
     <section id="dist-coverage" class="scroll-section">
-        <h1>🛡️ Distribution Coverage</h1>
+        <h1>🛡️ Distribution Coverage
+            <span class="info-tip" data-tip="Coverage ratio = total return / current yield. 1-2x is ideal. Below 1x means distributions are partially funded by NAV erosion — the fund is paying you with your own principal.">ⓘ</span>
+        </h1>
         <p class="subtitle">Coverage ratio (1-2x ideal). Measures if distributions are supported by NAV.</p>
         <div id="dist-coverage-content" class="card"></div>
     </section>
 
     <!-- NAV EROSION -->
     <section id="nav-erosion" class="scroll-section">
-        <h1>📉 NAV Erosion</h1>
+        <h1>📉 NAV Erosion
+            <span class="info-tip" data-tip="Net Asset Value change since inception (price-only, excluding dividends). Negative values mean the fund's underlying portfolio is shrinking — a critical risk for income investors who rely on capital preservation.">ⓘ</span>
+        </h1>
         <p class="subtitle">NAV Change since inception. Negative = capital loss even before distributions.</p>
         <div id="nav-erosion-content" class="card"></div>
     </section>
 
     <!-- TOTAL RETURN -->
     <section id="total-return" class="scroll-section">
-        <h1>📈 Total Return</h1>
+        <h1>📈 Total Return
+            <span class="info-tip" data-tip="Trailing total returns including reinvested dividends. Shows 1-year, 3-year, 5-year, and 10-year performance where available. This is the actual return an investor would have received holding the ETF.">ⓘ</span>
+        </h1>
         <p class="subtitle">Trailing 12 months, 3-year, 5-year, and 10-year total returns</p>
         <div id="total-return-content" class="card"></div>
     </section>
 
     <!-- SHARPE / SORTINO / CALMAR -->
     <section id="sharpe" class="scroll-section">
-        <h1>🎯 Risk-Adjusted Returns</h1>
+        <h1>🎯 Risk-Adjusted Returns
+            <span class="info-tip" data-tip="Sharpe = (return − risk-free rate) ÷ total volatility. Sortino uses only downside volatility (preferred). Calmar = return ÷ maximum drawdown. Higher is better across all three.">ⓘ</span>
+        </h1>
         <p class="subtitle">Sharpe, Sortino, and Calmar ratios — hover for details</p>
         <div id="sharpe-content" class="card"></div>
     </section>
 
     <!-- TRAILING 12M PERFORMANCE -->
     <section id="t12-perf" class="scroll-section">
-        <h1>⏱️ Trailing 12M Performance</h1>
+        <h1>⏱️ Trailing 12M Performance
+            <span class="info-tip" data-tip="Best and worst performing ETFs over the last 12 months based on total return. Helps identify trends, momentum, and outlier performance across the high-yield ETF universe.">ⓘ</span>
+        </h1>
         <p class="subtitle">Best and worst performing ETFs over the last 12 months</p>
         <div id="t12-perf-content" class="card"></div>
     </section>
 
     <!-- BETA & CORRELATION -->
     <section id="beta" class="scroll-section">
-        <h1>📈 Beta & Correlation vs S&P 500</h1>
+        <h1>📈 Beta & Correlation vs S&P 500
+            <span class="info-tip" data-tip="X-axis = beta (magnitude of movement vs S&P 500). Y-axis = correlation (direction alignment). Lower on both means better diversification away from the broad market. Hover dots for ticker details.">ⓘ</span>
+        </h1>
         <p class="subtitle">Lower = better diversification. Hover for ticker details.</p>
         <div class="card">
             <div class="tab-bar" id="beta-period-tabs">
@@ -228,7 +278,9 @@
 
     <!-- ALL ETFs RETURN CHART -->
     <section id="return-chart" class="scroll-section">
-        <h1>📊 All ETFs — Return Chart</h1>
+        <h1>📊 All ETFs — Return Chart
+            <span class="info-tip" data-tip="3-year annualized return vs annualized volatility scatter plot. Each dot = one ETF. Upper-left quadrant = best risk-adjusted returns (high return, low volatility).">ⓘ</span>
+        </h1>
         <p class="subtitle">3-year total return scatter: annualized return vs annualized volatility</p>
         <div class="chart-container" style="height:500px">
             <canvas id="return-scatter-chart"></canvas>
@@ -237,11 +289,15 @@
 
     <!-- PORTFOLIO BUILDER -->
     <section id="portfolio" class="scroll-section">
-        <h1>💼 Custom Portfolio Builder</h1>
+        <h1>💼 Custom Portfolio Builder
+            <span class="info-tip" data-tip="Backtest your own portfolio with real monthly price &amp; dividend data. Select ETFs, set weights, choose reinvestment % and rebalance frequency. See projected NAV growth, monthly income, and total return for any lookback period.">ⓘ</span>
+        </h1>
         <p class="subtitle">Build and backtest your own high-yield ETF portfolio with real monthly prices</p>
         <div class="portfolio-builder">
             <div class="pf-selector card">
-                <h3>Select ETFs</h3>
+                <h3>Select ETFs
+                    <span class="info-tip" data-tip="Search by ticker or name to add ETFs. 4-8 ETFs with max 25% per ETF is recommended for proper diversification.">ⓘ</span>
+                </h3>
                 <div class="pf-search">
                     <input type="text" id="pf-search" placeholder="Search ticker or name...">
                     <div id="pf-search-results" class="pf-dropdown"></div>
@@ -319,7 +375,9 @@
 
     <!-- BEST PORTFOLIOS -->
     <section id="best" class="scroll-section">
-        <h1>🥇 Best Performing Portfolios</h1>
+        <h1>🥇 Best Performing Portfolios
+            <span class="info-tip" data-tip="Monte Carlo simulation testing thousands of random 4-8 ETF portfolio combinations (max 25% per ETF). Shows the top 25 portfolios for each time period. Green-highlighted tickers appear in multiple top-ranked portfolios.">ⓘ</span>
+        </h1>
         <p class="subtitle">Monte Carlo simulation — 4-8 ETFs each, max 25% per ETF</p>
         <div class="card">
             <div class="controls">
@@ -330,6 +388,7 @@
                         <option value="5yr">Last 5 Years</option>
                         <option value="10yr">Last 10 Years</option>
                     </select>
+                    <span class="info-tip" data-tip="Select the lookback period for the Monte Carlo simulation. Longer periods include fewer eligible ETFs (older funds only).">ⓘ</span>
                 </label>
                 <label>Sort by:
                     <select id="bp-sort">
@@ -338,6 +397,7 @@
                         <option value="nav_change">NAV Change</option>
                         <option value="sharpe">Sharpe Ratio</option>
                     </select>
+                    <span class="info-tip" data-tip="Sort the top 25 portfolios by income (annualized avail/10K), total return, NAV change, or Sharpe ratio.">ⓘ</span>
                 </label>
                 <span id="bp-eligible" class="hint"></span>
             </div>
@@ -347,6 +407,6 @@
 
 </main>
 
-<script src="/static/js/app.v29.js" defer></script>
+<script src="/static/js/app.v30.js" defer></script>
 </body>
 </html>
