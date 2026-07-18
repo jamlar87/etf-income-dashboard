@@ -423,21 +423,93 @@ def list_categories():
 
 
 @app.get("/api/leaderboard")
-def leaderboard(period: str = Query("1yr")):
+def leaderboard(
+    period: str = Query("1yr"),
+    mode: str = Query("high_income"),
+    exclude_leveraged: bool = Query(True),
+    min_aum: float = Query(2000),
+    max_expense: float = Query(3.0),
+    min_yield: float = Query(0),
+    min_nav_change: float = Query(-10),
+    min_sharpe: float = Query(-10),
+):
     conn = get_db()
-    etfs = conn.execute("SELECT * FROM etfs").fetchall()
     
-    # Apply live yield metrics to leaderboard data
-    live = _compute_live_metrics(conn)
+    if mode == "full":
+        # Query from universe with quality filters
+        conditions = []
+        params = []
+        if exclude_leveraged:
+            conditions.append("(u.is_leveraged IS NULL OR u.is_leveraged = 0)")
+        if min_aum > 0:
+            conditions.append("(u.aum IS NOT NULL AND u.aum >= ?)")
+            params.append(min_aum)
+        if max_expense < 100:
+            conditions.append("(COALESCE(e.expense_ratio, u.expense_ratio) IS NULL OR COALESCE(e.expense_ratio, u.expense_ratio) <= ?)")
+            params.append(max_expense)
+        if min_yield > 0:
+            conditions.append("(COALESCE(e.current_yield, u.current_yield) IS NOT NULL AND COALESCE(e.current_yield, u.current_yield) >= ?)")
+            params.append(min_yield)
+        if min_nav_change > -100:
+            conditions.append("(COALESCE(e.nav_annual_change, u.nav_annual_change) IS NULL OR COALESCE(e.nav_annual_change, u.nav_annual_change) >= ?)")
+            params.append(min_nav_change)
+        if min_sharpe > -10:
+            conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
+            params.append(min_sharpe)
+        
+        where = " AND ".join(conditions) if conditions else "1=1"
+        
+        query = f"""
+            SELECT * FROM (
+                SELECT
+                    u.ticker,
+                    COALESCE(e.name, u.name) AS name,
+                    COALESCE(e.provider, u.provider) AS provider,
+                    COALESCE(e.category, u.category) AS category,
+                    COALESCE(e.inception_date, u.inception_date) AS inception_date,
+                    COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
+                    COALESCE(e.current_yield, u.current_yield) AS current_yield,
+                    COALESCE(e.avg_yield_since_inception, u.avg_yield_since_inception) AS avg_yield_since_inception,
+                    COALESCE(e.nav_annual_change, u.nav_annual_change) AS nav_annual_change,
+                    COALESCE(e.total_return_1yr, u.total_return_1yr) AS total_return_1yr,
+                    COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
+                    COALESCE(e.sharpe_t12, u.sharpe_t12) AS sharpe_t12,
+                    COALESCE(e.sortino_ratio, u.sortino_ratio) AS sortino_ratio,
+                    COALESCE(e.calmar_ratio, u.calmar_ratio) AS calmar_ratio,
+                    COALESCE(e.total_return_3yr, u.total_return_3yr) AS total_return_3yr,
+                    COALESCE(e.total_return_5yr, u.total_return_5yr) AS total_return_5yr,
+                    COALESCE(e.total_return_10yr, u.total_return_10yr) AS total_return_10yr,
+                    COALESCE(e.price_return_1yr, u.price_return_1yr) AS price_return_1yr,
+                    COALESCE(e.beta_sp500, u.beta_sp500) AS beta_sp500,
+                    COALESCE(e.correlation_sp500, u.correlation_sp500) AS correlation_sp500,
+                    COALESCE(e.distribution_coverage, u.distribution_coverage) AS distribution_coverage,
+                    COALESCE(e.available_income_10k, u.available_income_10k) AS available_income_10k,
+                    COALESCE(e.growth_10k, u.growth_10k) AS growth_10k,
+                    COALESCE(e.tax_treatment_score, u.tax_treatment_score) AS tax_treatment_score,
+                    COALESCE(e.income_stability_score, u.income_stability_score) AS income_stability_score,
+                    u.is_leveraged
+                FROM etf_universe u
+                LEFT JOIN etfs e ON u.ticker = e.ticker
+                WHERE {where}
+            )
+        """
+        rows = conn.execute(query, params).fetchall()
+        etfs_raw = [dict(r) for r in rows]
+        # No live metrics for universe mode (too many tickers)
+        etf_list = etfs_raw
+    else:
+        # Original behavior: curated 160 ETFs with live metrics
+        etfs = conn.execute("SELECT * FROM etfs").fetchall()
+        live = _compute_live_metrics(conn)
+        etf_list = []
+        for e in etfs:
+            d = dict(e)
+            t = d["ticker"]
+            if t in live:
+                d.update(live[t])
+            etf_list.append(d)
+    
     conn.close()
-    
-    etf_list = []
-    for e in etfs:
-        d = dict(e)
-        t = d["ticker"]
-        if t in live:
-            d.update(live[t])
-        etf_list.append(d)
     period_field = {
         "1yr": "total_return_1yr",
         "3yr": "total_return_3yr",
