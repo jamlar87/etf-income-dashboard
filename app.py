@@ -756,24 +756,30 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def _load_cache_from_disk(cache_key):
     """Try to load cached Monte Carlo results from disk.
-    Cache is valid as long as the database hasn't been modified since it was created."""
+    Cache is valid as long as:
+    1. Database hasn't been modified since cache was written, AND
+    2. Cache is less than 30 days old."""
     cache_file = CACHE_DIR / f"{cache_key}.json"
     if not cache_file.exists():
         return None
     
     try:
+        cache_mtime = cache_file.stat().st_mtime
+        age_days = (time.time() - cache_mtime) / 86400
+        
+        # Monthly refresh: invalidate if cache is 30+ days old
+        if age_days >= 30:
+            return None
+        
         with open(cache_file) as f:
             data = json.load(f)
         if not isinstance(data, list) or len(data) == 0:
             return None
         
-        # Only invalidate cache if DB was modified after the cache was written
+        # Invalidate if DB was modified after cache was written
         db_path = Path("/media/james/SlowDisk1tb/etf-dashboard/etfs.db")
         if db_path.exists():
-            db_mtime = db_path.stat().st_mtime
-            cache_mtime = cache_file.stat().st_mtime
-            if db_mtime > cache_mtime:
-                # DB was updated after cache — stale
+            if db_path.stat().st_mtime > cache_mtime:
                 return None
         
         return data
