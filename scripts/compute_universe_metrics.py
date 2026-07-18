@@ -1,46 +1,24 @@
 #!/usr/bin/env python3
-"""Live ETF data refresh via yfinance — pulls real metrics for high-yield ETFs.
-Run daily via cron. Uses finance venv.
-v2: fixed yield calc, timezone handling, DB schema.
-"""
+"""Compute full metrics (beta, sortino, calmar, etc.) for universe ETFs that pass quality filters."""
+
 import sqlite3
 import sys
-import os
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import numpy as np
-import pandas as pd
+import time
 import yfinance as yf
-import warnings
-warnings.filterwarnings("ignore")
+import pandas as pd
+import numpy as np
+from datetime import datetime, timezone
 
 DB_PATH = "/media/james/SlowDisk1tb/etf-dashboard/etfs.db"
-_LOCAL_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "etfs.db")
-if not os.path.exists(os.path.dirname(DB_PATH)):
-    DB_PATH = _LOCAL_DB
-RISK_FREE = 0.045
-MAX_WORKERS = 8
-NOW = pd.Timestamp.now(tz="America/New_York")
+RISK_FREE = 5.0  # annual risk-free rate (%)
 
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def get_all_tickers():
-    conn = get_db()
-    rows = conn.execute("SELECT ticker FROM etfs ORDER BY ticker").fetchall()
-    conn.close()
-    return [r["ticker"] for r in rows]
+NOW = pd.Timestamp.now()
 
 
 def safe_div_yield(info, etf, current_price):
     """Calculate current dividend yield from yfinance info or dividend history."""
     best_yield = None
 
-    # Try all yfinance sources first
     for field in ["trailingAnnualDividendYield", "dividendYield"]:
         val = info.get(field)
         if val and 0 < val < 2.0:
@@ -53,7 +31,6 @@ def safe_div_yield(info, etf, current_price):
             best_yield = dr / current_price * 100
 
     if best_yield is None and current_price:
-        # Fall back: compute from trailing 12 months of dividends
         divs = etf.dividends
         if len(divs) > 0:
             year_ago = NOW - pd.Timedelta(days=365)
@@ -69,8 +46,7 @@ def safe_div_yield(info, etf, current_price):
 
     best_yield = round(best_yield, 2)
 
-    # SANITY CHECK: If yield > 50%, cross-verify against actual dividend history
-    # to catch bad yfinance data for traditional dividend ETFs
+    # Sanity check
     if best_yield > 50 and current_price:
         divs = etf.dividends
         if len(divs) >= 12:
@@ -80,22 +56,20 @@ def safe_div_yield(info, etf, current_price):
                 recent = divs[divs.index >= (NOW - pd.Timedelta(days=365))]
             if len(recent) >= 4:
                 hist_yield = recent.sum() / current_price * 100
-                # If historical calc shows much lower, it's a data error — trust history
                 if hist_yield < best_yield * 0.5:
                     best_yield = round(hist_yield, 2)
 
     return best_yield
 
 
-def fetch_ticker_data(ticker):
-    """Fetch and compute metrics for one ticker."""
+def compute_etf(ticker, existing_yield=None, existing_er=None):
+    """Compute all metrics for one ETF ticker from yfinance price history."""
     try:
         etf = yf.Ticker(ticker)
         info = etf.info
 
         hist = etf.history(period="max")
         if hist.empty or len(hist) < 20:
-            print(f"  {ticker}: insufficient history ({len(hist)} days)")
             return None
 
         closes = hist["Close"]
@@ -103,11 +77,13 @@ def fetch_ticker_data(ticker):
         daily_returns = closes.pct_change().dropna()
 
         if len(daily_returns) < 60:
-            print(f"  {ticker}: too few returns ({len(daily_returns)})")
             return None
 
-        # Yield
-        current_yield = safe_div_yield(info, etf, current_price)
+        # Yield — use pre-existing if available, else compute fresh
+        if existing_yield and existing_yield < 50:
+            current_yield = existing_yield
+        else:
+            current_yield = safe_div_yield(info, etf, current_price)
 
         # Sharpe
         excess = daily_returns - RISK_FREE / 252
@@ -134,7 +110,11 @@ def fetch_ticker_data(ticker):
             divs = etf.dividends
             div_sum = 0
             if len(divs) > 0:
-                mask = (divs.index >= period.index[0]) & (divs.index <= period.index[-1])
+                try:
+                    mask = (divs.index.tz_localize(None) >= period.index[0].tz_localize(None)) & \
+                           (divs.index.tz_localize(None) <= period.index[-1].tz_localize(None))
+                except (TypeError, AttributeError):
+                    mask = (divs.index >= period.index[0]) & (divs.index <= period.index[-1])
                 div_sum = divs[mask].sum()
             return round((end_p + div_sum) / start_p * 100 - 100, 2)
 
@@ -204,14 +184,12 @@ def fetch_ticker_data(ticker):
         else:
             st12 = sharpe
 
+        # Inception date from info
         inception = info.get("fundInceptionDate") or info.get("inceptionDate")
         if inception and isinstance(inception, (int, float)):
-            inception = datetime.fromtimestamp(inception).strftime("%Y-%m-%d")
-
-        print(f"  {ticker}: y={current_yield}%, sh={sharpe}, nav={nav}%, beta={beta}")
+            inception = datetime.fromtimestamp(inception, tz=timezone.utc).strftime("%Y-%m-%d")
 
         return {
-            "ticker": ticker,
             "current_yield": current_yield,
             "avg_yield_since_inception": avg_yy,
             "distribution_coverage": dc,
@@ -230,75 +208,105 @@ def fetch_ticker_data(ticker):
             "growth_10k": growth,
             "nav_annual_change": nav,
             "inception_date": inception,
-            "expense_ratio": round(info.get("netExpenseRatio", 0) * 100, 2) if info.get("netExpenseRatio") else None,
+            "expense_ratio": round(info.get("netExpenseRatio"), 2) if info.get("netExpenseRatio") else None,
         }
     except Exception as e:
         print(f"  {ticker}: ERROR - {type(e).__name__}: {e}")
         return None
 
 
-def update_database(results):
-    conn = get_db()
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--filter", choices=["filtered", "all", "remaining"], default="filtered",
+                        help="Which ETFs to compute: filtered=$2B+no-lev, all=everyone, remaining=those without metrics")
+    parser.add_argument("--delay", type=float, default=0.3)
+    parser.add_argument("--limit", type=int, default=0)
+    args = parser.parse_args()
+
+    conn = sqlite3.connect(DB_PATH)
+
+    # Determine which tickers to process
+    if args.filter == "filtered":
+        rows = conn.execute("""
+            SELECT ticker, current_yield, expense_ratio
+            FROM etf_universe
+            WHERE (is_leveraged IS NULL OR is_leveraged = 0)
+              AND (aum IS NOT NULL AND aum >= 2000)
+              AND is_active = 1
+              AND is_high_income = 0
+            ORDER BY ticker
+        """).fetchall()
+    elif args.filter == "remaining":
+        rows = conn.execute("""
+            SELECT ticker, current_yield, expense_ratio
+            FROM etf_universe
+            WHERE (beta_sp500 IS NULL OR price_return_1yr IS NULL)
+              AND is_active = 1
+              AND is_high_income = 0
+            ORDER BY ticker
+        """).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT ticker, current_yield, expense_ratio
+            FROM etf_universe
+            WHERE is_active = 1
+              AND is_high_income = 0
+            ORDER BY ticker
+        """).fetchall()
+
+    if args.limit > 0:
+        rows = rows[:args.limit]
+
+    print(f"Computing metrics for {len(rows)} universe ETFs...")
     updated = 0
-    for r in results:
-        if r is None:
+    skipped = 0
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    commit_counter = 0
+
+    for ticker, existing_yield, existing_er in rows:
+        result = compute_etf(ticker, existing_yield, existing_er)
+        if result is None:
+            skipped += 1
+            print(f"  {ticker}: skipped (no data)")
             continue
-        ticker = r.pop("ticker")
-        inception = r.pop("inception_date", None)
 
-        set_parts = []
-        values = []
-        for k, v in r.items():
-            if v is not None:
-                set_parts.append(f"{k} = ?")
-                values.append(v)
+        # Build UPDATE
+        set_clauses = []
+        vals = []
+        for key, val in result.items():
+            if val is not None:
+                set_clauses.append(f"{key} = ?")
+                vals.append(val)
 
-        if inception:
-            set_parts.append("inception_date = ?")
-            values.append(inception)
+        set_clauses.append("last_updated = ?")
+        vals.append(now_str)
+        vals.append(ticker)
 
-        if set_parts:
-            set_parts.append("last_updated = datetime('now')")
-            values.append(ticker)
-            sql = f"UPDATE etfs SET {', '.join(set_parts)} WHERE ticker = ?"
-            conn.execute(sql, values)
+        sql = f"UPDATE etf_universe SET {', '.join(set_clauses)} WHERE ticker = ?"
+        try:
+            conn.execute(sql, vals)
             updated += 1
+            commit_counter += 1
+        except Exception as e:
+            print(f"  {ticker}: DB error - {e}")
+            skipped += 1
+            continue
+
+        y = result.get("current_yield")
+        b = result.get("beta_sp500")
+        s3 = result.get("total_return_3yr")
+        print(f"  {ticker}: y={y}%  beta={b}  ret3y={s3}%")
+
+        if commit_counter >= 50:
+            conn.commit()
+            commit_counter = 0
+
+        time.sleep(args.delay)
 
     conn.commit()
     conn.close()
-    print(f"\nUpdated {updated} ETFs with live data.")
-
-
-def main():
-    tickers = get_all_tickers()
-    print(f"Fetching live data for {len(tickers)} ETFs ({MAX_WORKERS} workers, {NOW.date()})...\n")
-
-    results = []
-    good, bad = 0, 0
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(fetch_ticker_data, t): t for t in tickers}
-        for f in as_completed(futures):
-            t = futures[f]
-            try:
-                r = f.result(timeout=60)
-                if r:
-                    good += 1
-                else:
-                    bad += 1
-                results.append(r)
-            except Exception as e:
-                print(f"  {t}: TIMEOUT - {e}")
-                bad += 1
-                results.append(None)
-
-    print(f"\nDone. {good} ok, {bad} failed.")
-    update_database([r for r in results if r is not None])
-
-    conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM etfs WHERE nav_annual_change IS NOT NULL").fetchone()[0]
-    conn.close()
-    print(f"ETFs with live data: {count}/{len(tickers)}")
+    print(f"\nDone! Updated {updated}, skipped {skipped}")
 
 
 if __name__ == "__main__":
