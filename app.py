@@ -80,6 +80,94 @@ def list_etfs(
     return [dict(r) for r in rows]
 
 
+@app.get("/api/etfs/newest-growth")
+def newest_growth(limit: int = Query(15)):
+    """Return $10K growth data for the newest ETFs (for the reference growth chart)."""
+    conn = get_db()
+    # Find newest ETFs with price history
+    newest = conn.execute("""
+        SELECT ticker, name, inception_date FROM etfs
+        WHERE inception_date IS NOT NULL
+          AND ticker IN (SELECT DISTINCT ticker FROM price_history)
+        ORDER BY inception_date DESC LIMIT ?
+    """, (limit,)).fetchall()
+
+    tickers = [r["ticker"] for r in newest]
+    start_dates = {r["ticker"]: r["inception_date"] for r in newest}
+
+    if not tickers:
+        conn.close()
+        return {"tickers": [], "growth_data": {}}
+
+    placeholders = ",".join("?" * len(tickers))
+    rows = conn.execute(f"""
+        SELECT ticker, date, close
+        FROM price_history
+        WHERE ticker IN ({placeholders})
+        ORDER BY date
+    """, tickers).fetchall()
+    conn.close()
+
+    # Group by ticker, compute $10K growth
+    histories = {}
+    for r in rows:
+        t = r["ticker"]
+        if t not in histories:
+            histories[t] = []
+        histories[t].append({"date": r["date"], "close": float(r["close"])})
+
+    growth_data = {}
+    for t in tickers:
+        hist = histories.get(t, [])
+        if len(hist) < 2:
+            continue
+        start_price = hist[0]["close"]
+        if not start_price or start_price <= 0:
+            continue
+
+        # Price return: $10K * (current_price / start_price)
+        price_points = [{"date": h["date"], "value": round(10000 * h["close"] / start_price, 2)} for h in hist]
+
+        # Total return: include dividends reinvested
+        # Get dividend amounts aligned to the same dates
+        conn3 = get_db()
+        div_rows = conn3.execute(
+            "SELECT date, dividend FROM price_history WHERE ticker = ? ORDER BY date", (t,)
+        ).fetchall()
+        conn3.close()
+
+        div_map = {r["date"]: float(r["dividend"]) for r in div_rows}
+
+        total_points = []
+        shares = 10000.0 / start_price
+        cash_from_divs = 0.0
+
+        for h in hist:
+            date = h["date"]
+            price = h["close"]
+            # Add any dividend from this period
+            div = div_map.get(date, 0)
+            if div > 0:
+                cash_from_divs += shares * div
+
+            value = shares * price + cash_from_divs
+            total_points.append({"date": date, "value": round(value, 2)})
+
+        growth_data[t] = {
+            "name": start_dates.get(t, t),
+            "start_date": hist[0]["date"],
+            "price_growth": price_points,
+            "total_growth": total_points,
+            "total_return_value": round(total_points[-1]["value"], 2) if total_points else 10000,
+            "price_return_value": round(price_points[-1]["value"], 2) if price_points else 10000,
+            "initial_value": 10000,
+        }
+
+    return {
+        "tickers": [t for t in tickers if t in growth_data],
+        "growth_data": growth_data,
+    }
+
 @app.get("/api/etfs/new")
 def newest_additions(limit: int = Query(20)):
     """Return ETFs with the most recent inception dates (dynamic 'newest' list)."""

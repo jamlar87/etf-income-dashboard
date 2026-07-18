@@ -50,7 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
     loadBestPortfolios();
 });
 
-// === NEWEST ADDITIONS ===
+// === NEWEST ADDITIONS (styled to match reference) ===
+let newestGrowthChart = null; // chart instance
+
 async function loadNewest() {
     const resp = await fetch(`${API}/etfs/new?limit=50`);
     const etfs = await resp.json();
@@ -65,6 +67,65 @@ async function loadNewest() {
             <div class="na-return ${cls}">${arrow} ${pct(e.total_return_1yr)} <span class="na-ttm">T12M</span></div>
         </div>`;
     }).join('');
+    // Also load the growth chart for these ETFs
+    loadNewestGrowth();
+}
+
+async function loadNewestGrowth() {
+    const d = await (await fetch(`${API}/etfs/newest-growth?limit=10`)).json();
+    const tickers = d.tickers;
+    if (!tickers.length) return;
+    const ctx = document.getElementById('newest-growth-chart').getContext('2d');
+    if (newestGrowthChart) newestGrowthChart.destroy();
+
+    // Generate colors
+    const colors = ['#4fc3f7','#46b97e','#e74c5c','#f0a030','#4a90d9','#9b59b6','#1abc9c','#e67e22','#2ecc71','#e91e63'];
+
+    const datasets = [];
+    tickers.forEach((t, i) => {
+        const g = d.growth_data[t];
+        if (!g || !g.price_growth?.length) return;
+        const labels = g.price_growth.map(p => p.date);
+        datasets.push({
+            label: t + ' (Price)',
+            data: g.price_growth.map(p => p.value),
+            borderColor: colors[i % colors.length],
+            borderDash: [4, 4],
+            pointRadius: 0,
+            tension: 0.3,
+            fill: false,
+        });
+        if (g.total_growth?.length) {
+            datasets.push({
+                label: t + ' (Total)',
+                data: g.total_growth.map(p => p.value),
+                borderColor: colors[i % colors.length],
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.3,
+                fill: false,
+            });
+        }
+    });
+
+    const allDates = tickers.flatMap(t => (d.growth_data[t]?.price_growth || []).map(p => p.date));
+    const uniqueDates = [...new Set(allDates)].sort();
+
+    newestGrowthChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: uniqueDates, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#ccc', font: { size: 10 } } },
+                title: { display: true, text: '$10,000 Investment Growth — Newest ETFs', color: '#e8eaed' }
+            },
+            scales: {
+                y: { title: { display: true, text: 'Portfolio Value ($)', color: '#888' }, ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: '#1e2538' } },
+                x: { ticks: { color: '#888', maxTicksLimit: 12, maxRotation: 45 }, grid: { color: '#1e2538' } },
+            }
+        }
+    });
 }
 
 // === OVERVIEW / LEADERBOARD ===
