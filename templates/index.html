@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>High Yield Income ETF Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
-<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/style.v4.css">
 </head>
 <body>
 <nav class="sidebar">
@@ -14,8 +14,17 @@
         <p>NAV Erosion & Stress-Test Analysis</p>
     </div>
     <div id="status-badge" style="padding:4px 18px;font-size:0.7em;color:var(--orange)">Loading data...</div>
+    <div class="period-selector">
+        <label>Lookback:</label>
+        <select id="global-period">
+            <option value="1yr">12M</option>
+            <option value="3yr">3Y</option>
+            <option value="5yr">5Y</option>
+            <option value="10yr">10Y</option>
+            <option value="max">Max</option>
+        </select>
+    </div>
     <ul class="nav-menu">
-        <li><a href="#newest" class="nav-link">🆕 Newest Additions</a></li>
         <li><a href="#overview" class="nav-link">📋 Overview / Leaderboard</a></li>
         <li><a href="#compare" class="nav-link">📊 ETF Comparison Table</a></li>
         <li class="nav-separator"><span>Yield & Coverage</span></li>
@@ -35,24 +44,6 @@
 </nav>
 
 <main class="content">
-
-    <!-- NEWEST ADDITIONS -->
-    <section id="newest" class="scroll-section">
-        <h1>🆕 Newest Additions</h1>
-        <p class="subtitle">Hover ticker for fund name — top number = current yield, bottom = T12M total return</p>
-        <div class="card" style="padding:14px">
-            <span style="font-size:1.1em;font-weight:700"><span id="new-count" class="badge">0</span> ETFs added</span>
-            <span id="new-date" style="float:right;color:var(--text-dim);font-size:0.82em"></span>
-            <div class="na-grid" id="new-etfs-grid" style="margin-top:12px"></div>
-        </div>
-        <div class="card" style="padding:14px;margin-top:14px">
-            <h3 style="margin-bottom:8px">📈 $10,000 Investment Growth</h3>
-            <p style="color:var(--text-dim);font-size:0.82em;margin-bottom:10px">Price Return (No Reinvest) vs Total Return (incl. Dividends) — from latest common inception</p>
-            <div class="chart-container" style="height:400px">
-                <canvas id="newest-growth-chart"></canvas>
-            </div>
-        </div>
-    </section>
 
     <!-- OVERVIEW / LEADERBOARD -->
     <section id="overview" class="scroll-section">
@@ -78,7 +69,7 @@
             <div class="stat-card">
                 <span class="stat-icon">🎯</span>
                 <span class="stat-num" id="os-best-sharpe">--</span>
-                <span class="stat-desc">Best Sharpe (Orig)</span>
+                <span class="stat-desc" id="os-best-sharpe-label">Best Sharpe (Orig)</span>
             </div>
         </div>
 
@@ -151,6 +142,16 @@
             </div>
         </div>
 
+        <!-- INVESTMENT GROWTH CHART -->
+        <div class="card">
+            <h2>📈 $10,000 Investment Growth</h2>
+            <p style="color:var(--text-dim);font-size:0.82em">Price return (no dividends) — normalized to $10K at earliest date. All tickers shown.</p>
+            <div class="chart-container" style="height:1200px;overflow-y:auto;position:relative">
+                <div id="growth-status" style="text-align:center;padding:20px;color:var(--orange);font-size:0.85em">⏳ Loading growth chart...</div>
+                <canvas id="growth-chart" style="width:100%;height:1150px;display:none"></canvas>
+            </div>
+        </div>
+
         <!-- Key Metrics Comparison Chart -->
         <div class="card">
             <h2>📊 Key Metrics Comparison</h2>
@@ -160,7 +161,7 @@
                 <button class="tab-btn" data-metric="sharpe">Sharpe Ratio</button>
                 <button class="tab-btn" data-metric="returns">Returns</button>
             </div>
-            <div class="chart-container" style="height:400px;margin-top:12px">
+            <div class="chart-container" style="height:1200px;margin-top:12px;overflow-y:auto">
                 <canvas id="metrics-chart"></canvas>
             </div>
         </div>
@@ -182,8 +183,8 @@
 
     <!-- NAV EROSION -->
     <section id="nav-erosion" class="scroll-section">
-        <h1>📉 NAV Erosion / Growth</h1>
-        <p class="subtitle">Annualized NAV change — negative values mean principal erosion</p>
+        <h1>📉 NAV Erosion</h1>
+        <p class="subtitle">NAV Change since inception. Negative = capital loss even before distributions.</p>
         <div id="nav-erosion-content" class="card"></div>
     </section>
 
@@ -212,8 +213,16 @@
     <section id="beta" class="scroll-section">
         <h1>📈 Beta & Correlation vs S&P 500</h1>
         <p class="subtitle">Lower = better diversification. Hover for ticker details.</p>
-        <div class="chart-container" style="height:550px">
-            <canvas id="beta-chart"></canvas>
+        <div class="card">
+            <div class="tab-bar" id="beta-period-tabs">
+                <button class="tab-btn active" data-period="t12m">Trailing 12M</button>
+                <button class="tab-btn" data-period="3yr">Trailing 3Y</button>
+                <button class="tab-btn" data-period="full">Full History</button>
+            </div>
+            <div class="chart-container" style="height:550px;margin-top:12px">
+                <canvas id="beta-chart"></canvas>
+            </div>
+            <div id="beta-provider-legend" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;font-size:0.78em"></div>
         </div>
     </section>
 
@@ -245,6 +254,15 @@
                 <div class="pf-controls card">
                     <label>Investment: $<input type="number" id="pf-investment" value="25000" min="1000" step="1000"></label>
                     <label>Reinvest: <input type="range" id="pf-reinvest" value="50" min="0" max="100"> <span id="pf-reinvest-val">50%</span></label>
+                    <label>Period:
+                        <select id="pf-period">
+                            <option value="max">Max (common inception)</option>
+                            <option value="1yr">1 Year</option>
+                            <option value="3yr">3 Years</option>
+                            <option value="5yr">5 Years</option>
+                            <option value="10yr">10 Years</option>
+                        </select>
+                    </label>
                     <label>Rebalance:
                         <select id="pf-rebalance">
                             <option value="none">None</option>
@@ -255,15 +273,44 @@
                     <button id="pf-simulate" class="btn">▶ Simulate</button>
                 </div>
                 <div class="pf-results card" style="display:none">
+                    <div class="pf-info" id="pf-info" style="margin-bottom:12px;font-size:0.85em;color:var(--text-dim);line-height:1.6"></div>
                     <div class="stats-row" id="pf-stats">
                         <div class="stat-box"><span class="stat-val" id="pf-final-val">--</span><span class="stat-label">Final Value</span></div>
                         <div class="stat-box"><span class="stat-val" id="pf-cash">--</span><span class="stat-label">Cash Received</span></div>
                         <div class="stat-box"><span class="stat-val" id="pf-total-ret">--</span><span class="stat-label">Total Return</span></div>
                         <div class="stat-box"><span class="stat-val" id="pf-nav-chg">--</span><span class="stat-label">NAV Change</span></div>
                     </div>
-                    <div class="chart-row">
-                        <div class="chart-half"><canvas id="pf-nav-chart"></canvas></div>
-                        <div class="chart-half"><canvas id="pf-income-chart"></canvas></div>
+                    <div class="tab-bar" id="pf-chart-tabs" style="margin-top:12px">
+                        <button class="tab-btn active" data-pfchart="value">Portfolio Value</button>
+                        <button class="tab-btn" data-pfchart="income">Monthly Income</button>
+                        <button class="tab-btn" data-pfchart="nav">NAV Analysis</button>
+                    </div>
+                    <div class="chart-container" style="height:400px;margin-top:4px">
+                        <canvas id="pf-chart-canvas"></canvas>
+                    </div>
+                    <div class="pf-nav-stats" id="pf-nav-stats" style="display:none;margin-top:8px;gap:12px;justify-content:center">
+                        <div class="stat-box" style="min-width:180px">
+                            <span class="stat-val" id="pf-nav-change-total">--</span>
+                            <span class="stat-label">Total NAV Change ($)</span>
+                        </div>
+                        <div class="stat-box" style="min-width:180px">
+                            <span class="stat-val" id="pf-nav-change-annual">--</span>
+                            <span class="stat-label">Annualized NAV Change</span>
+                        </div>
+                    </div>
+                    <div class="pf-income-stats" id="pf-income-stats" style="display:none;margin-top:8px;gap:12px;justify-content:center">
+                        <div class="stat-box" style="min-width:150px">
+                            <span class="stat-val" id="pf-avg-income">--</span>
+                            <span class="stat-label">Avg Monthly Income</span>
+                        </div>
+                        <div class="stat-box" style="min-width:150px">
+                            <span class="stat-val" id="pf-ann-income">--</span>
+                            <span class="stat-label">Annualized Income</span>
+                        </div>
+                        <div class="stat-box" style="min-width:150px">
+                            <span class="stat-val" id="pf-yield-cost">--</span>
+                            <span class="stat-label">Yield on Cost</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -300,6 +347,6 @@
 
 </main>
 
-<script src="/static/js/app.js" defer></script>
+<script src="/static/js/app.v28.js" defer></script>
 </body>
 </html>

@@ -213,10 +213,19 @@ def list_categories():
 
 
 @app.get("/api/leaderboard")
-def leaderboard():
+def leaderboard(period: str = Query("1yr")):
     conn = get_db()
     etfs = conn.execute("SELECT * FROM etfs").fetchall()
     conn.close()
+
+    # Map period param to the right total_return field
+    period_field = {
+        "1yr": "total_return_1yr",
+        "3yr": "total_return_3yr",
+        "5yr": "total_return_5yr",
+        "10yr": "total_return_10yr",
+        "max": "total_return_10yr",
+    }.get(period, "total_return_1yr")
 
     categories = {
         "highest_yield": [],
@@ -239,9 +248,9 @@ def leaderboard():
     categories["highest_yield"] = _safe_sort(lambda x: x["current_yield"], etf_list)[:10]
     categories["best_dist_coverage"] = _safe_sort(lambda x: x["distribution_coverage"], etf_list)[:10]
 
-    for period in ["total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr"]:
-        valid = [e for e in etf_list if e[period] is not None]
-        categories[f"best_{period}"] = _safe_sort(lambda x, p=period: x[p], valid)[:10]
+    for p in ["total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr"]:
+        valid = [e for e in etf_list if e[p] is not None]
+        categories[f"best_{p}"] = _safe_sort(lambda x, p=p: x[p], valid)[:10]
 
     categories["best_sharpe"] = _safe_sort(lambda x: x["sharpe_ratio"], etf_list)[:10]
     categories["best_sortino"] = _safe_sort(lambda x: x["sortino_ratio"], etf_list)[:10]
@@ -265,11 +274,73 @@ def leaderboard():
 
     yields = [e["current_yield"] for e in etf_list if e["current_yield"] is not None]
     avg_yield = round(sum(yields) / len(yields), 2) if yields else 0
+
+    # Period-specific best values
+    best_total_return = None
+    best_sharpe = None
+    if period_field in ["total_return_1yr","total_return_3yr","total_return_5yr","total_return_10yr"]:
+        valid = [e for e in etf_list if e[period_field] is not None]
+        if valid:
+            best = max(valid, key=lambda x: x[period_field])
+            best_total_return = (best["ticker"], round(best[period_field], 2))
+
+    # Period-specific Sharpe: 1yr → sharpe_t12, max → sharpe_ratio, others → compute from price history
+    if period == "1yr":
+        valid_sh = [e for e in etf_list if e["sharpe_t12"] is not None]
+        if valid_sh:
+            best_s = max(valid_sh, key=lambda x: x["sharpe_t12"])
+            best_sharpe = (best_s["ticker"], round(best_s["sharpe_t12"], 2))
+    elif period == "max":
+        valid_sh = [e for e in etf_list if e["sharpe_ratio"] is not None]
+        if valid_sh:
+            best_s = max(valid_sh, key=lambda x: x["sharpe_ratio"])
+            best_sharpe = (best_s["ticker"], round(best_s["sharpe_ratio"], 2))
+    else:
+        # Compute Sharpe from price history for 3yr/5yr/10yr
+        conn2 = get_db()
+        months_map = {"3yr": 36, "5yr": 60, "10yr": 120}
+        n_months = months_map.get(period, 36)
+        # Get SPY and all ETF prices
+        tickers_all = [e["ticker"] for e in etf_list]
+        ph_rows = conn2.execute(
+            "SELECT ticker, date, close FROM price_history ORDER BY date DESC"
+        ).fetchall()
+        conn2.close()
+        # Group by ticker
+        price_map = {}
+        for r in ph_rows:
+            t = r["ticker"]
+            if t not in price_map:
+                price_map[t] = []
+            price_map[t].append(float(r["close"]))
+        # Compute Sharpe for each ETF
+        sharpe_results = []
+        for e in etf_list:
+            t = e["ticker"]
+            closes = price_map.get(t, [])
+            if len(closes) < n_months + 1:
+                continue
+            recent = closes[:n_months + 1]
+            returns = [(recent[i-1] - recent[i]) / recent[i] for i in range(1, len(recent))]
+            if len(returns) < 3:
+                continue
+            mean_r = sum(returns) / len(returns)
+            std_r = math.sqrt(sum((r - mean_r)**2 for r in returns) / (len(returns) - 1))
+            if std_r > 0:
+                sharpe = (mean_r * 12) / (std_r * math.sqrt(12))  # annualized
+                sharpe_results.append((e["ticker"], round(sharpe, 2)))
+        if sharpe_results:
+            best_s = max(sharpe_results, key=lambda x: x[1])
+            best_sharpe = best_s
+
     stats = {
         "total_etfs": len(etf_list),
         "avg_yield": avg_yield,
         "highest_yield": max(yields) if yields else 0,
         "providers": len(set(e["provider"] for e in etf_list)),
+        "best_total_return": best_total_return,
+        "best_sharpe": best_sharpe,
+        "period": period,
     }
 
     return {"stats": stats, "categories": leaderboard}
@@ -278,23 +349,202 @@ def leaderboard():
 @app.get("/api/beta-correlation")
 def beta_correlation(period: str = Query("1yr")):
     conn = get_db()
+
+    # Get all ETFs
     rows = conn.execute("""
         SELECT ticker, name, provider, beta_sp500, correlation_sp500, current_yield
         FROM etfs WHERE beta_sp500 IS NOT NULL
     """).fetchall()
+
+    # Determine month cutoff
+    now = datetime.now()
+    if period == "1yr":
+        cutoff = now - timedelta(days=400)  # generous buffer for monthly data
+    elif period == "3yr":
+        cutoff = now - timedelta(days=1100)
+    else:  # full
+        cutoff = datetime(1900, 1, 1)
+
+    cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+    # Fetch price history for all tickers + SPY
+    tickers = [r["ticker"] for r in rows]
+    all_tickers = tickers + ["SPY"]
+    if not tickers:
+        conn.close()
+        return {"points": [], "period": period}
+
+    placeholders = ",".join("?" * len(all_tickers))
+    price_rows = conn.execute(
+        f"SELECT ticker, date, close, dividend FROM price_history WHERE ticker IN ({placeholders}) AND date >= ? ORDER BY ticker, date",
+        [*all_tickers, cutoff_str]
+    ).fetchall()
+
+    # Build price dict: ticker -> [{date, close}, ...]
+    prices = {}
+    for r in price_rows:
+        t = r["ticker"]
+        if t not in prices:
+            prices[t] = []
+        prices[t].append({"date": r["date"], "close": float(r["close"])})
+
     conn.close()
+
+    # Compute monthly returns for each ticker
+    def monthly_returns(ticker):
+        pts = prices.get(ticker, [])
+        if len(pts) < 3:
+            return []
+        rets = []
+        for i in range(1, len(pts)):
+            prev = pts[i-1]["close"]
+            curr = pts[i]["close"]
+            if prev > 0:
+                rets.append((curr - prev) / prev)
+        return rets
+
+    spy_rets = monthly_returns("SPY")
+    if len(spy_rets) < 3:
+        # Fallback to DB stored values
+        points = []
+        for r in rows:
+            points.append({
+                "ticker": r["ticker"], "name": r["name"], "provider": r["provider"],
+                "beta": r["beta_sp500"], "correlation": r["correlation_sp500"],
+                "yield": r["current_yield"],
+            })
+        return {"points": points, "period": period}
+
+    # Helper: compute beta and correlation between two return series
+    def compute_beta_corr(etf_rets, spy_rets):
+        n = min(len(etf_rets), len(spy_rets))
+        if n < 3:
+            return None, None
+        er = etf_rets[-n:]
+        sr = spy_rets[-n:]
+        mean_er = sum(er) / n
+        mean_sr = sum(sr) / n
+        cov = sum((er[i] - mean_er) * (sr[i] - mean_sr) for i in range(n)) / (n - 1)
+        var_sr = sum((sr[i] - mean_sr) ** 2 for i in range(n)) / (n - 1)
+        std_er = math.sqrt(sum((er[i] - mean_er) ** 2 for i in range(n)) / (n - 1))
+        std_sr = math.sqrt(var_sr)
+        beta = cov / var_sr if var_sr > 0 else 0
+        corr = cov / (std_er * std_sr) if (std_er > 0 and std_sr > 0) else 0
+        return beta, corr
 
     points = []
     for r in rows:
+        etf_rets = monthly_returns(r["ticker"])
+        beta, corr = compute_beta_corr(etf_rets, spy_rets)
+        if beta is None:
+            beta = r["beta_sp500"]
+            corr = r["correlation_sp500"]
         points.append({
-            "ticker": r["ticker"],
-            "name": r["name"],
-            "provider": r["provider"],
-            "beta": r["beta_sp500"],
-            "correlation": r["correlation_sp500"],
+            "ticker": r["ticker"], "name": r["name"], "provider": r["provider"],
+            "beta": round(beta, 2), "correlation": round(corr, 2),
             "yield": r["current_yield"],
         })
+
     return {"points": points, "period": period}
+
+
+@app.get("/api/price-growth")
+def price_growth(period: str = Query("1yr")):
+    conn = get_db()
+
+    # Determine start date based on period
+    now = datetime.now()
+    period_days = {"1yr": 400, "3yr": 1100, "5yr": 1825, "10yr": 3650, "max": 99999}
+    days = period_days.get(period, 400)
+    cutoff = now - timedelta(days=days)
+    cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+    # Get all ETF tickers with inception before cutoff
+    rows = conn.execute(
+        "SELECT ticker, name FROM etfs ORDER BY ticker"
+    ).fetchall()
+    tickers = [r["ticker"] for r in rows]
+
+    # Fetch monthly close prices since cutoff
+    placeholders = ",".join("?" * len(tickers))
+    price_rows = conn.execute(
+        f"SELECT ticker, date, close FROM price_history WHERE ticker IN ({placeholders}) AND date >= ? ORDER BY ticker, date",
+        [*tickers, cutoff_str]
+    ).fetchall()
+    conn.close()
+
+    # Group by ticker
+    price_map = {}
+    dates_set = set()
+    for r in price_rows:
+        t = r["ticker"]
+        d = r["date"]
+        c = float(r["close"])
+        if t not in price_map:
+            price_map[t] = []
+        price_map[t].append({"date": d, "close": c})
+        dates_set.add(d)
+
+    # Sort dates and keep those with enough data
+    all_dates = sorted(dates_set)
+    if not all_dates:
+        return {"labels": [], "datasets": []}
+
+    # For each date, count how many tickers have data
+    date_counts = {}
+    for d in all_dates:
+        cnt = sum(1 for pts in price_map.values() if any(p["date"] == d for p in pts))
+        date_counts[d] = cnt
+
+    # Find the first date where at least 10% of tickers have data (reduces early sparse dates)
+    min_ratio = 0.15
+    total_tickers = len(tickers)
+    first_good = None
+    for d in all_dates:
+        if date_counts[d] / total_tickers >= min_ratio:
+            first_good = d
+            break
+
+    if first_good is None:
+        first_good = all_dates[0]
+
+    # Trim labels to start from first_good
+    trimmed_labels = []
+    for d in all_dates:
+        if d >= first_good:
+            trimmed_labels.append(d)
+    all_dates = trimmed_labels
+    if not all_dates:
+        return {"labels": [], "datasets": []}
+
+    # Build datasets: normalize each ticker to $10,000 at first price
+    datasets = []
+    for t in tickers:
+        pts = price_map.get(t, [])
+        if len(pts) < 4:
+            continue
+        # Map to date → close
+        pt_map = {p["date"]: p["close"] for p in pts}
+        first_close = None
+        values = []
+        for d in all_dates:
+            c = pt_map.get(d)
+            if c is None:
+                values.append(None)
+            else:
+                if first_close is None:
+                    first_close = c
+                values.append(round(c / first_close * 10000, 2))
+        # Skip tickers with zero data
+        if not any(v is not None for v in values):
+            continue
+        datasets.append({
+            "ticker": t,
+            "data": values,
+            "fill": False,
+        })
+
+    return {"labels": all_dates, "datasets": datasets}
 
 
 def _get_monthly_prices(conn, tickers):
@@ -370,6 +620,16 @@ def simulate_portfolio(data: dict):
     if not months or len(months) < 2:
         raise HTTPException(400, "Not enough overlapping history for selected tickers")
 
+    # Apply period filter
+    period = data.get("period", "max")
+    if period != "max" and period in ("1yr", "3yr", "5yr", "10yr"):
+        years = int(period.replace("yr", ""))
+        cutoff_date = (datetime.strptime(months[-1], "%Y-%m-%d") - timedelta(days=years * 365 + 1)).strftime("%Y-%m-%d")
+        months = [m for m in months if m >= cutoff_date]
+        if len(months) < 2:
+            raise HTTPException(400, f"Not enough history for {period} period with selected tickers")
+        start_date = months[0]
+
     # Simulate month by month
     shares = {}
     cash = 0.0
@@ -391,6 +651,10 @@ def simulate_portfolio(data: dict):
 
     monthly_nav = []
     monthly_income = []
+    monthly_no_reinvest = []
+
+    # Record initial shares for no-reinvest calculation
+    initial_shares = dict(shares)
 
     # Process subsequent months
     for i, month in enumerate(months[1:], 1):
@@ -445,6 +709,14 @@ def simulate_portfolio(data: dict):
         monthly_nav.append(round(current_nav, 2))
         monthly_income.append(round(month_income, 2))
 
+        # NAV-only: initial shares at current prices (no reinvestment)
+        nr_value = 0
+        for t in tickers:
+            entry = next((p for p in price_data[t] if p["date"] == month), None)
+            if entry:
+                nr_value += initial_shares.get(t, 0) * entry["close"]
+        monthly_no_reinvest.append(round(nr_value, 2))
+
     # Final value
     final_value = cash
     last_month = months[-1]
@@ -466,8 +738,9 @@ def simulate_portfolio(data: dict):
         "avg_yield": avg_yield,
         "months": len(months) - 1,
         "start_date": start_date,
-        "monthly_nav": monthly_nav,
-        "monthly_income": monthly_income,
+        'monthly_nav': monthly_nav,
+        'monthly_income': monthly_income,
+        'monthly_no_reinvest': monthly_no_reinvest,
     }
 
 
@@ -491,11 +764,17 @@ def best_portfolios(
     else:
         lookback_months = 12
 
-    # Find tickers with sufficient history
-    cutoff = f"datetime('now', '-{lookback_months + 1} months')"
+    # Find tickers with sufficient history (have data spanning the lookback period)
+    min_rows = max(int(lookback_months * 0.7), 6)
+    cutoff_start = f"datetime('now', '-{lookback_months + 2} months')"
+    cutoff_end = f"datetime('now', '-1 month')"
     rows = conn.execute(f"""
-        SELECT DISTINCT ticker FROM price_history
-        WHERE date <= {cutoff}
+        SELECT ticker, COUNT(*) as cnt, MIN(date) as first_d, MAX(date) as last_d
+        FROM price_history
+        WHERE date >= {cutoff_start} AND date <= {cutoff_end}
+        GROUP BY ticker
+        HAVING cnt >= {min_rows}
+        ORDER BY cnt DESC
     """).fetchall()
 
     eligible = [r["ticker"] for r in rows]
@@ -517,7 +796,7 @@ def best_portfolios(
     if len(recent_tickers) < 4:
         return {"portfolios": [], "eligible_etfs": len(recent_tickers), "period": period}
 
-    # Run Monte Carlo
+    # Run Monte Carlo — buy-and-hold simulation matching original dashboard
     n_simulations = min(3000, math.comb(len(recent_tickers), 4) * 5)
     n_simulations = max(n_simulations, 200)
     random.seed(42)
@@ -531,51 +810,102 @@ def best_portfolios(
         tw = sum(raw_weights)
         weights = [w / tw for w in raw_weights]
 
-        # Simulate this portfolio over the lookback period
-        total_ret = 0
-        monthly_rets = []
         initial_val = 10000
-        nav_val = initial_val
-        total_income = 0
+        buy_price = {}  # ticker -> first month close
+        nav_values = []   # monthly NAV (price only)
+        monthly_incomes = []
+        total_cash_received = 0
+        shares = {}
 
-        for i, t in enumerate(selected):
-            hist = price_data[t][-lookback_months:]
-            if len(hist) < 2:
+        # Find common months across selected tickers
+        common_months = None
+        for t in selected:
+            hist = price_data.get(t, [])
+            if not hist:
                 continue
+            ticker_months = {h["date"] for h in hist}
+            if common_months is None:
+                common_months = ticker_months
+            else:
+                common_months &= ticker_months
 
-            start_p = hist[0]["close"]
-            end_p = hist[-1]["close"]
-            divs = sum(h["dividend"] for h in hist[1:])
+        if not common_months:
+            continue
 
-            if start_p > 0:
-                etf_ret = (end_p + divs) / start_p - 1
-                total_ret += etf_ret * weights[i]
+        common_months = sorted(common_months)
+        if len(common_months) < 2:
+            continue
 
-            # Monthly returns for Sharpe
-            for j in range(1, len(hist)):
-                m_ret = (hist[j]["close"] + hist[j]["dividend"]) / hist[j - 1]["close"] - 1
-                monthly_rets.append(m_ret * weights[i])
+        # Trim to lookback period
+        if len(common_months) > lookback_months:
+            common_months = common_months[-lookback_months:]
 
-            # Income calc
-            avg_monthly_div = divs / max(len(hist) - 1, 1)
-            total_income += avg_monthly_div / hist[0]["close"] * nav_val * weights[i]
+        # Month 0: allocate and buy shares
+        start_m = common_months[0]
+        for i, t in enumerate(selected):
+            entry = next((h for h in price_data.get(t, []) if h["date"] == start_m), None)
+            if entry and entry["close"] > 0:
+                alloc = initial_val * weights[i]
+                shares[t] = alloc / entry["close"]
+                buy_price[t] = entry["close"]
+            else:
+                shares[t] = 0
 
-        if monthly_rets:
-            avg_mret = sum(monthly_rets) / len(monthly_rets)
-            std_mret = (sum((r - avg_mret) ** 2 for r in monthly_rets) / len(monthly_rets)) ** 0.5
+        # Month 1+ : collect dividends, track NAV
+        for m in common_months[1:]:
+            m_nav = 0
+            m_income = 0
+            for t in selected:
+                entry = next((h for h in price_data.get(t, []) if h["date"] == m), None)
+                if not entry or shares.get(t, 0) == 0:
+                    continue
+                m_nav += shares[t] * entry["close"]
+                m_income += shares[t] * entry["dividend"]
+            total_cash_received += m_income
+            nav_values.append(m_nav)
+            monthly_incomes.append(m_income)
+
+        if not nav_values:
+            continue
+
+        final_nav = nav_values[-1]
+        num_months = len(nav_values)
+
+        # Total return = (NAV + cash received) / initial - 1
+        avg_monthly_income = total_cash_received / num_months if num_months > 0 else 0
+        total_return_pct = ((final_nav + total_cash_received) / initial_val - 1) * 100
+        nav_change_pct = (final_nav / initial_val - 1) * 100
+        available_income_per_10k = round(avg_monthly_income * 12, 2)  # annualized avg income per $10K
+        avg_yield_pct = (avg_monthly_income * 12 / initial_val) * 100
+
+        # Sharpe ratio from monthly total returns
+        portfolio_monthly_rets = []
+        for i in range(num_months):
+            total_val = nav_values[i] + sum(monthly_incomes[:i+1])
+            if i == 0:
+                prev_total = initial_val
+            else:
+                prev_total = nav_values[i-1] + sum(monthly_incomes[:i])
+            if prev_total > 0:
+                m_ret = (total_val - prev_total) / prev_total
+                portfolio_monthly_rets.append(m_ret)
+
+        if len(portfolio_monthly_rets) >= 2:
+            avg_mret = sum(portfolio_monthly_rets) / len(portfolio_monthly_rets)
+            std_mret = (sum((r - avg_mret) ** 2 for r in portfolio_monthly_rets) / len(portfolio_monthly_rets)) ** 0.5
             sharpe = (avg_mret * 12 - 0.045) / (std_mret * (12 ** 0.5)) if std_mret > 0 else 0
         else:
             sharpe = 0
 
-        nav_change = (nav_val * (1 + total_ret) - nav_val) / nav_val * 100
-
         all_portfolios.append({
             "etfs": [{"ticker": selected[i], "weight": round(weights[i] * 100, 1)} for i in range(len(selected))],
-            "avg_yield": round(total_income / nav_val * 100, 2),
-            "total_return": round(total_ret * 100, 2),
-            "nav_change": round(nav_change, 2),
+            "avg_yield": round(avg_yield_pct, 1),
+            "total_return": round(total_return_pct, 1),
+            "nav_change": round(nav_change_pct, 1),
             "sharpe": round(sharpe, 2),
-            "monthly_income": round(total_income, 2),
+            "monthly_income": round(avg_monthly_income, 2),
+            "available_income_per_10k": available_income_per_10k,
+            "num_etfs": len(selected),
         })
 
     sort_keys = {

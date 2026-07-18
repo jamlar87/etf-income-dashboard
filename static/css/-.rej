@@ -1,0 +1,10 @@
+--- index.html
++++ index.html
+@@ -323,6 +323,6 @@
+ </main>
+ 
+-<script src="/static/js/app.v24.js" defer></script>
++<script src="/static/js/app.v25.js" defer></script>
+ </body>
+ </html>
+ 

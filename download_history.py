@@ -62,6 +62,23 @@ def download_incremental(ticker, last_date):
             cutoff = pd.Timestamp(last_date, tz="America/New_York")
             hist = hist[hist.index > cutoff]
 
+        # If monthly has only NaN closes, fallback to daily aggregation
+        if last_date and len(hist) > 0 and hist["Close"].isna().all():
+            try:
+                daily = etf.history(period="max", interval="1d")
+                if not daily.empty:
+                    monthly = daily.resample("ME").agg({
+                        "Close": "last",
+                        "Dividends": "sum",
+                    }).dropna(subset=["Close"])
+                    cutoff = pd.Timestamp(last_date, tz="America/New_York")
+                    monthly = monthly[monthly.index > cutoff]
+                    if not monthly.empty:
+                        print(f"  {ticker}: fell back to daily aggregation ({len(monthly)} months)")
+                        hist = monthly
+            except Exception:
+                pass
+
         if hist.empty:
             return None  # No new data
 
