@@ -47,6 +47,62 @@ async def index(request: Request):
     return HTMLResponse(template.render({"request": request}))
 
 
+def _compute_live_metrics(conn):
+    """Compute current_yield, distribution_coverage, available_income_10k from
+    price_history data in real time, so results are always current regardless
+    of when the last snapshot refresh ran."""
+    
+    # Trailing 12-month dividends per ticker
+    div_rows = conn.execute("""
+        SELECT ticker, SUM(dividend) as total_div
+        FROM price_history
+        WHERE dividend > 0 AND date >= DATE('now', '-12 months')
+        GROUP BY ticker
+    """).fetchall()
+    div_map = {r["ticker"]: r["total_div"] for r in div_rows}
+    
+    # Latest close price per ticker
+    close_rows = conn.execute("""
+        SELECT p.ticker, p.close
+        FROM price_history p
+        INNER JOIN (
+            SELECT ticker, MAX(date) as max_date
+            FROM price_history WHERE close > 0
+            GROUP BY ticker
+        ) latest ON p.ticker = latest.ticker AND p.date = latest.max_date
+    """).fetchall()
+    close_map = {r["ticker"]: float(r["close"]) for r in close_rows}
+    
+    # NAV annual change (stored, needed for distribution coverage)
+    nav_rows = conn.execute(
+        "SELECT ticker, nav_annual_change, total_return_1yr FROM etfs"
+    ).fetchall()
+    nav_map = {r["ticker"]: {"nav": r["nav_annual_change"], "tr": r["total_return_1yr"]} for r in nav_rows}
+    
+    result = {}
+    for t in div_map:
+        price = close_map.get(t)
+        total_div = div_map[t]
+        nav_info = nav_map.get(t, {})
+        nav = nav_info.get("nav") or 0
+        tr = nav_info.get("tr") or 0
+        
+        if price and price > 0 and total_div > 0:
+            live_yield = round(total_div / price * 100, 2)
+            nav_val = float(nav) if nav else 0
+            nav_erosion = max(0, -nav_val / 100)
+            dc = round(1 + nav_val / max(live_yield, 0.1), 2) if live_yield > 0 else 0
+            avail = round(10000 * (live_yield / 100 - nav_erosion), 0)
+            
+            result[t] = {
+                "current_yield": live_yield,
+                "distribution_coverage": dc,
+                "available_income_10k": avail,
+            }
+    
+    return result
+
+
 @app.get("/api/etfs")
 def list_etfs(
     provider: str = Query(None),
@@ -81,8 +137,27 @@ def list_etfs(
         query += " ORDER BY current_yield DESC"
 
     rows = conn.execute(query, params).fetchall()
+    
+    # Compute live yield-based metrics from price_history
+    live = _compute_live_metrics(conn)
     conn.close()
-    return [dict(r) for r in rows]
+    
+    # Override stale snapshot fields with live-computed values
+    override_fields = {"current_yield", "distribution_coverage", "available_income_10k"}
+    result = []
+    for r in rows:
+        d = dict(r)
+        t = d["ticker"]
+        if t in live:
+            d.update(live[t])
+        result.append(d)
+    
+    # Python-side sort for yield-derived fields (so sort uses live values)
+    if sort_by in override_fields:
+        direction = sort_dir.lower() == "desc"
+        result.sort(key=lambda x: x.get(sort_by) if x.get(sort_by) is not None else (-1 if direction else 99999), reverse=direction)
+    
+    return result
 
 
 @app.get("/api/etfs/newest-growth")
@@ -221,9 +296,18 @@ def list_categories():
 def leaderboard(period: str = Query("1yr")):
     conn = get_db()
     etfs = conn.execute("SELECT * FROM etfs").fetchall()
+    
+    # Apply live yield metrics to leaderboard data
+    live = _compute_live_metrics(conn)
     conn.close()
-
-    # Map period param to the right total_return field
+    
+    etf_list = []
+    for e in etfs:
+        d = dict(e)
+        t = d["ticker"]
+        if t in live:
+            d.update(live[t])
+        etf_list.append(d)
     period_field = {
         "1yr": "total_return_1yr",
         "3yr": "total_return_3yr",
@@ -245,7 +329,7 @@ def leaderboard(period: str = Query("1yr")):
         "best_nav_growth": [],
     }
 
-    etf_list = [dict(e) for e in etfs]
+    # Note: etf_list is already built above with live yield overrides
 
     def _safe_sort(keyfn, lst, reverse=True):
         return sorted([x for x in lst if keyfn(x) is not None], key=keyfn, reverse=reverse)
@@ -449,7 +533,15 @@ def beta_correlation(period: str = Query("1yr")):
             "beta": round(beta, 2), "correlation": round(corr, 2),
             "yield": r["current_yield"],
         })
-
+    
+    # Apply live yields
+    live = _compute_live_metrics(conn)
+    conn.close()
+    live_map = {tick: v["current_yield"] for tick, v in live.items()}
+    for p in points:
+        if p["ticker"] in live_map:
+            p["yield"] = live_map[p["ticker"]]
+    
     return {"points": points, "period": period}
 
 
@@ -1068,18 +1160,34 @@ def update_tax_score(ticker: str = Form(...), score: str = Form("")):
 def overview_stats():
     conn = get_db()
     count = conn.execute("SELECT COUNT(*) FROM etfs").fetchone()[0]
-    avg_yield = conn.execute("SELECT AVG(current_yield) FROM etfs").fetchone()[0]
+    
+    # Live avg yield from price_history
+    live = _compute_live_metrics(conn)
+    if live:
+        yields = [v["current_yield"] for v in live.values() if v.get("current_yield")]
+        avg_yield = round(sum(yields) / len(yields), 2) if yields else 0
+    else:
+        avg_yield = conn.execute("SELECT AVG(current_yield) FROM etfs").fetchone()[0]
+    
     providers = conn.execute("SELECT COUNT(DISTINCT provider) FROM etfs").fetchone()[0]
     newest = conn.execute(
-        "SELECT ticker, name, current_yield, total_return_1yr FROM etfs WHERE current_yield IS NOT NULL ORDER BY inception_date DESC LIMIT 15"
+        "SELECT ticker, name, current_yield, total_return_1yr, inception_date FROM etfs WHERE inception_date IS NOT NULL ORDER BY inception_date DESC LIMIT 15"
     ).fetchall()
     conn.close()
 
+    # Override newest additions with live yields
+    newest_list = []
+    for r in newest:
+        d = dict(r)
+        if d["ticker"] in live:
+            d["current_yield"] = live[d["ticker"]]["current_yield"]
+        newest_list.append(d)
+
     return {
         "total_etfs": count,
-        "avg_yield": round(avg_yield, 2),
+        "avg_yield": avg_yield,
         "total_providers": providers,
-        "newest_additions": [dict(r) for r in newest],
+        "newest_additions": newest_list,
     }
 
 
