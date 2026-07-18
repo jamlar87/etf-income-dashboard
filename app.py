@@ -2,7 +2,11 @@
 import sqlite3
 import random
 import math
+import json
+import os
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from functools import lru_cache
 from fastapi import FastAPI, Query, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -745,8 +749,45 @@ def simulate_portfolio(data: dict):
     }
 
 
-# Cache for Monte Carlo results so multi-criteria queries don't re-run
+# Cache for Monte Carlo results — persisted to disk for cross-session reuse
 _best_pf_cache = {}
+CACHE_DIR = Path("/media/james/SlowDisk1tb/etf-dashboard")
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+def _load_cache_from_disk(cache_key):
+    """Try to load cached Monte Carlo results from disk.
+    Cache is valid as long as the database hasn't been modified since it was created."""
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    if not cache_file.exists():
+        return None
+    
+    try:
+        with open(cache_file) as f:
+            data = json.load(f)
+        if not isinstance(data, list) or len(data) == 0:
+            return None
+        
+        # Only invalidate cache if DB was modified after the cache was written
+        db_path = Path("/media/james/SlowDisk1tb/etf-dashboard/etfs.db")
+        if db_path.exists():
+            db_mtime = db_path.stat().st_mtime
+            cache_mtime = cache_file.stat().st_mtime
+            if db_mtime > cache_mtime:
+                # DB was updated after cache — stale
+                return None
+        
+        return data
+    except (json.JSONDecodeError, OSError):
+        return None
+
+def _save_cache_to_disk(cache_key, data):
+    """Persist Monte Carlo results to disk."""
+    cache_file = CACHE_DIR / f"{cache_key}.json"
+    try:
+        with open(cache_file, "w") as f:
+            json.dump(data, f)
+    except OSError as e:
+        print(f"Warning: could not write cache {cache_file}: {e}")
 
 def _run_monte_carlo(tickers, lookback_months, tax_scores):
     """Run the full Monte Carlo simulation and return all portfolios with all metrics."""
@@ -935,7 +976,14 @@ def best_portfolios(
     # If already cached for this period, reuse
     cache_key = f"best_portfolios_{lookback_months}"
     if cache_key not in _best_pf_cache:
-        _best_pf_cache[cache_key] = _run_monte_carlo(recent_tickers, lookback_months, tax_scores)
+        # Check disk cache first (cross-session persistence)
+        disk_data = _load_cache_from_disk(cache_key)
+        if disk_data is not None:
+            _best_pf_cache[cache_key] = disk_data
+        else:
+            _best_pf_cache[cache_key] = _run_monte_carlo(recent_tickers, lookback_months, tax_scores)
+            # Persist to disk for future sessions
+            _save_cache_to_disk(cache_key, _best_pf_cache[cache_key])
     all_portfolios = _best_pf_cache[cache_key]
     n_simulations = len(all_portfolios)
 
