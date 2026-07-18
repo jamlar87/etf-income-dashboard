@@ -14,8 +14,8 @@
         <p>NAV Erosion & Stress-Test Analysis</p>
     </div>
     <ul class="nav-menu">
-        <li><a href="#newest" class="nav-link" data-section="newest">🆕 Newest Additions</a></li>
-        <li><a href="#overview" class="nav-link active" data-section="overview">📋 Overview / Leaderboard</a></li>
+        <li><a href="#newest" class="nav-link active" data-section="newest">🆕 Newest Additions</a></li>
+        <li><a href="#overview" class="nav-link" data-section="overview">📋 Overview / Leaderboard</a></li>
         <li><a href="#compare" class="nav-link" data-section="compare">📊 ETF Comparison Table</a></li>
         <li class="nav-separator"><span>Yield & Coverage</span></li>
         <li><a href="#dist-yield" class="nav-link" data-section="dist-yield">💵 Distribution Yield</a></li>
@@ -36,12 +36,13 @@
 <main class="content">
 
     <!-- NEWEST ADDITIONS -->
-    <section id="newest" class="section">
+    <section id="newest" class="section active">
         <h1>🆕 Newest Additions</h1>
-        <p class="subtitle">Recently added ETFs — hover for full name. Top number = current yield, bottom = T12 total return.</p>
-        <div id="newest-additions" class="card">
-            <span id="new-count" class="badge">0</span> ETFs added in most recent update
-            <div id="new-etfs-grid" class="etf-grid" style="margin-top:12px"></div>
+        <p class="subtitle">Hover ticker for fund name — top number = current yield, bottom = T12M total return</p>
+        <div class="card" style="padding:14px">
+            <span style="font-size:1.1em;font-weight:700"><span id="new-count" class="badge">0</span> ETFs added</span>
+            <span id="new-date" style="float:right;color:var(--text-dim);font-size:0.82em"></span>
+            <div class="na-grid" id="new-etfs-grid" style="margin-top:12px"></div>
         </div>
     </section>
 

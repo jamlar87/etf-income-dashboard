@@ -44,20 +44,22 @@ function fmt(v, s='', d=2) {
 
 function pct(v) { return fmt(v, '%'); }
 
-// === NEWEST ADDITIONS ===
+// === NEWEST ADDITIONS (styled to match reference) ===
 async function loadNewest() {
-    const resp = await fetch(`${API}/etfs/new?limit=20`);
+    const resp = await fetch(`${API}/etfs/new?limit=50`);
     const etfs = await resp.json();
     document.getElementById('new-count').textContent = etfs.length;
+    document.getElementById('new-date').textContent = 'Latest inception: ' + (etfs[0]?.inception_date || 'N/A');
     const grid = document.getElementById('new-etfs-grid');
-    grid.innerHTML = etfs.map(e => `
-        <div class="etf-card" title="${e.name} (${e.inception_date || ''})">
-            <div class="ticker">${e.ticker}</div>
-            <div class="name">${e.name}</div>
-            <div class="yield">${pct(e.current_yield)}</div>
-            <div class="return ${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${pct(e.total_return_1yr)} T12</div>
-        </div>
-    `).join('');
+    grid.innerHTML = etfs.map(e => {
+        const arrow = e.total_return_1yr >= 0 ? '▲' : '▼';
+        const cls = e.total_return_1yr >= 0 ? 'positive' : 'negative';
+        return `<div class="na-card" title="${e.name}">
+            <div class="na-ticker">${e.ticker}</div>
+            <div class="na-yield">${pct(e.current_yield)}</div>
+            <div class="na-return ${cls}">${arrow} ${pct(e.total_return_1yr)} <span class="na-ttm">T12M</span></div>
+        </div>`;
+    }).join('');
 }
 
 // === OVERVIEW / LEADERBOARD ===
@@ -469,4 +471,3 @@ async function loadBestPortfolios() {
 
 // === INIT ===
 loadNewest();
-loadOverview();

@@ -149,30 +149,51 @@ h1 {
 .stat-num { font-size: 1.6em; font-weight: 700; color: var(--accent); }
 .stat-desc { font-size: 0.75em; color: var(--text-dim); margin-top: 3px; }
 
-/* ETF Grid */
-.etf-grid {
+/* Newest Additions Cards (reference style) */
+.na-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: 8px;
 }
 
-.etf-card {
+.na-card {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px;
+    border-radius: 8px;
+    padding: 10px 8px;
     text-align: center;
     cursor: default;
     transition: border-color 0.15s;
 }
 
-.etf-card:hover { border-color: var(--accent); }
-.etf-card .ticker { font-weight: 700; font-size: 0.9em; color: var(--accent); }
-.etf-card .name { font-size: 0.65em; color: var(--text-dim); margin: 3px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.etf-card .yield { font-size: 1.15em; font-weight: 700; color: var(--accent2); }
-.etf-card .return { font-size: 0.78em; }
-.etf-card .return.positive { color: var(--green); }
-.etf-card .return.negative { color: var(--red); }
+.na-card:hover { border-color: var(--accent); }
+
+.na-ticker {
+    font-weight: 700;
+    font-size: 0.82em;
+    color: var(--accent);
+    margin-bottom: 2px;
+}
+
+.na-yield {
+    font-size: 1.25em;
+    font-weight: 700;
+    color: var(--accent2);
+    line-height: 1.2;
+}
+
+.na-return {
+    font-size: 0.75em;
+    margin-top: 4px;
+}
+
+.na-return.positive { color: var(--green); }
+.na-return.negative { color: var(--red); }
+
+.na-ttm {
+    font-size: 0.75em;
+    color: var(--text-dim);
+}
 
 /* Controls */
 .controls {
