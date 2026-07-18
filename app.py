@@ -907,14 +907,15 @@ def best_portfolios(
         else:
             sharpe = 0
 
-        # Income stability: coefficient of variation of monthly income (lower = more stable)
+        # Income stability: downside-only deviation (drops penalized, growth ignored)
         non_zero = [i for i in monthly_incomes if i > 0]
-        if len(non_zero) >= 3:
-            inc_mean = sum(non_zero) / len(non_zero)
-            inc_var = sum((i - inc_mean) ** 2 for i in non_zero) / len(non_zero)
-            inc_std = inc_var ** 0.5
-            inc_cv = inc_std / inc_mean if inc_mean > 0 else 99
-            income_stability = round(1.0 / (1.0 + inc_cv), 3)
+        if len(non_zero) >= 4:
+            changes = [(non_zero[i] - non_zero[i-1]) / non_zero[i-1] * 100 for i in range(1, len(non_zero))]
+            neg = [abs(c) for c in changes if c < 0]
+            cut_freq = len(neg) / len(changes) if changes else 0
+            avg_depth = sum(neg) / len(neg) if neg else 0
+            penalty = (cut_freq ** 0.4) * (avg_depth / 25)
+            income_stability = round(max(0.05, min(1, 1 - penalty)), 3)
         else:
             income_stability = 0.5
 
@@ -931,7 +932,7 @@ def best_portfolios(
             "monthly_income": round(avg_monthly_income, 2),
             "available_income_per_10k": available_income_per_10k,
             "num_etfs": len(selected),
-            "income_stability": round(income_stability, 3) if 'income_stability' in dir() else 0,
+            "income_stability": income_stability,
             "tax_treatment": round(tax_treatment, 3) if 'tax_treatment' in dir() else 0,
         })
 
