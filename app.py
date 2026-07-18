@@ -897,6 +897,24 @@ def best_portfolios(
         else:
             sharpe = 0
 
+        # Income stability: coefficient of variation of monthly income (lower = more stable)
+        non_zero = [i for i in monthly_incomes if i > 0]
+        if len(non_zero) >= 3:
+            inc_mean = sum(non_zero) / len(non_zero)
+            inc_var = sum((i - inc_mean) ** 2 for i in non_zero) / len(non_zero)
+            inc_std = inc_var ** 0.5
+            inc_cv = inc_std / inc_mean if inc_mean > 0 else 99
+            income_stability = round(1.0 / (1.0 + inc_cv), 3)
+        else:
+            income_stability = 0.5
+
+        # Tax treatment proxy: fraction of total return from NAV appreciation
+        if total_return_pct > 1:
+            raw_tax = nav_change_pct / total_return_pct
+            tax_treatment = max(0, min(1, (raw_tax + 1) / 2))  # 0 = all dividends (less tax-eff), 1 = all appreciation (more tax-eff)
+        else:
+            tax_treatment = 0.5
+
         all_portfolios.append({
             "etfs": [{"ticker": selected[i], "weight": round(weights[i] * 100, 1)} for i in range(len(selected))],
             "avg_yield": round(avg_yield_pct, 1),
@@ -906,6 +924,8 @@ def best_portfolios(
             "monthly_income": round(avg_monthly_income, 2),
             "available_income_per_10k": available_income_per_10k,
             "num_etfs": len(selected),
+            "income_stability": round(income_stability, 3) if 'income_stability' in dir() else 0,
+            "tax_treatment": round(tax_treatment, 3) if 'tax_treatment' in dir() else 0,
         })
 
     sort_keys = {
@@ -913,6 +933,8 @@ def best_portfolios(
         "total_return": "total_return",
         "nav_change": "nav_change",
         "sharpe": "sharpe",
+        "income_stability": "income_stability",
+        "tax_treatment": "tax_treatment",
     }
     key = sort_keys.get(sort_by, "monthly_income")
     sorted_ports = sorted(all_portfolios, key=lambda x: -x[key])[:25]

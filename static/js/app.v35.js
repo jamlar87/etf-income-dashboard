@@ -1220,7 +1220,7 @@ async function loadBestPortfolios() {
         // Render intersection
         table.innerHTML = intersection.map((p, i) => {
             const data = p.data;
-            const rankTags = checked.map(c => `<span class="bp-rank-badge">${c}: #${p.ranks[c]}</span>`).join(' ');
+            const rankTags = checked.map(c => `<span class="bp-rank-badge">${({'income':'Income','total_return':'Total Ret','nav_change':'NAV','sharpe':'Sharpe','income_stability':'Stability','tax_treatment':'Tax'})[c]||c}: #${p.ranks[c]}</span>`).join(' ');
             return `<div class="bp-row" style="cursor:pointer" data-pf='${encodeURIComponent(JSON.stringify(data.etfs || []))}'>
                 <div class="bp-rank">#${i+1}</div>
                 <div class="bp-metrics">
