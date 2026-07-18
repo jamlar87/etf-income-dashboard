@@ -220,46 +220,50 @@ def list_universe(
         "total_return_5yr", "total_return_10yr", "sortino_ratio", "calmar_ratio",
     ]
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    # Use bare column name (COALESCE alias) — NO prefix, since both tables have the same columns
     order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in allowed_sorts else "ORDER BY current_yield DESC"
 
     # LEFT JOIN with etfs table so high-income tickers get all their enriched fields
+    # Wrap in subquery so ORDER BY references unambiguous output column aliases
     query = f"""
-        SELECT
-            u.ticker,
-            COALESCE(e.name, u.name) AS name,
-            u.asset_class,
-            u.aum,
-            u.is_high_income,
-            u.is_leveraged,
-            u.is_active,
-            COALESCE(e.provider, u.provider) AS provider,
-            COALESCE(e.category, u.category) AS category,
-            COALESCE(e.inception_date, u.inception_date) AS inception_date,
-            COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
-            COALESCE(e.current_yield, u.current_yield) AS current_yield,
-            u.nav_annual_change,
-            COALESCE(e.total_return_1yr, u.total_return_1yr) AS total_return_1yr,
-            COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
-            e.avg_yield_since_inception,
-            e.sharpe_t12,
-            e.sortino_ratio,
-            e.calmar_ratio,
-            e.total_return_3yr,
-            e.total_return_5yr,
-            e.total_return_10yr,
-            e.price_return_1yr,
-            e.beta_sp500,
-            e.correlation_sp500,
-            e.distribution_coverage,
-            e.available_income_10k,
-            e.growth_10k,
-            u.tax_treatment_score,
-            u.income_stability_score,
-            u.source,
-            u.last_updated
-        FROM etf_universe u
-        LEFT JOIN etfs e ON u.ticker = e.ticker
-        WHERE {where_clause}
+        SELECT * FROM (
+            SELECT
+                u.ticker,
+                COALESCE(e.name, u.name) AS name,
+                u.asset_class,
+                u.aum,
+                u.is_high_income,
+                u.is_leveraged,
+                u.is_active,
+                COALESCE(e.provider, u.provider) AS provider,
+                COALESCE(e.category, u.category) AS category,
+                COALESCE(e.inception_date, u.inception_date) AS inception_date,
+                COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
+                COALESCE(e.current_yield, u.current_yield) AS current_yield,
+                u.nav_annual_change,
+                COALESCE(e.total_return_1yr, u.total_return_1yr) AS total_return_1yr,
+                COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
+                e.avg_yield_since_inception,
+                e.sharpe_t12,
+                e.sortino_ratio,
+                e.calmar_ratio,
+                e.total_return_3yr,
+                e.total_return_5yr,
+                e.total_return_10yr,
+                e.price_return_1yr,
+                e.beta_sp500,
+                e.correlation_sp500,
+                e.distribution_coverage,
+                e.available_income_10k,
+                e.growth_10k,
+                u.tax_treatment_score,
+                u.income_stability_score,
+                u.source,
+                u.last_updated
+            FROM etf_universe u
+            LEFT JOIN etfs e ON u.ticker = e.ticker
+            WHERE {where_clause}
+        ) AS result
         {order_clause}
         LIMIT ? OFFSET ?
     """
