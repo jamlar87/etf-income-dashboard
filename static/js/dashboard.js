@@ -40,16 +40,16 @@ async function loadOverview() {
     document.getElementById('qs-providers').textContent = stats.total_providers;
 
     // Newest additions
-    const newResp = await fetch(`${API}/etfs/new`);
+    const newResp = await fetch(`${API}/etfs/new?limit=20`);
     const newEtfs = await newResp.json();
     document.getElementById('new-count').textContent = newEtfs.length;
     const grid = document.getElementById('new-etfs-grid');
     grid.innerHTML = newEtfs.map(e => `
-        <div class="etf-card" title="${e.name}">
+        <div class="etf-card" title="${e.name} (inception: ${e.inception_date || 'N/A'})">
             <div class="ticker">${e.ticker}</div>
-            <div class="name">${e.name}</div>
-            <div class="yield">${e.current_yield}%</div>
-            <div class="return ${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${e.total_return_1yr}% T12</div>
+            <div class="name" title="${e.name}">${e.name}</div>
+            <div class="yield">${e.current_yield != null ? e.current_yield + '%' : '--'}</div>
+            <div class="return ${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${e.total_return_1yr != null ? e.total_return_1yr + '%' : '--'} T12</div>
         </div>
     `).join('');
 }
@@ -142,23 +142,36 @@ function renderTable() {
         return va - vb;
     });
 
+    // Update sort indicator on header
+    document.querySelectorAll('#etf-table th').forEach(th => {
+        const key = th.dataset.sort;
+        if (!key) return;
+        th.innerHTML = th.innerHTML.replace(/ [▲▼]/, '');
+        if (key === sortBy) th.innerHTML += desc ? ' ▼' : ' ▲';
+    });
+
+    function fmt(val, suffix='', dec=2) {
+        if (val == null || val === '') return '--';
+        return Number(val).toFixed(dec) + suffix;
+    }
+
     const tbody = document.querySelector('#etf-table tbody');
     tbody.innerHTML = etfs.map(e => `
         <tr>
             <td><strong>${e.ticker}</strong></td>
             <td title="${e.name}">${e.name.length > 40 ? e.name.slice(0,38)+'…' : e.name}</td>
             <td>${e.provider}</td>
-            <td class="yield-col">${e.current_yield}%</td>
-            <td>${e.avg_yield_since_inception}%</td>
-            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${e.distribution_coverage}x</td>
-            <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${e.sharpe_ratio}</td>
-            <td>${e.sortino_ratio}</td>
-            <td>${e.calmar_ratio}</td>
-            <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${e.total_return_1yr}%</td>
-            <td class="yield-col">$${e.available_income_10k.toLocaleString()}</td>
-            <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${e.nav_annual_change}%</td>
-            <td>${e.beta_sp500}</td>
-            <td>${e.correlation_sp500}</td>
+            <td class="yield-col">${fmt(e.current_yield, '%')}</td>
+            <td>${fmt(e.avg_yield_since_inception, '%')}</td>
+            <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x')}</td>
+            <td class="${e.sharpe_ratio >= 0 ? 'positive' : 'negative'}">${fmt(e.sharpe_ratio)}</td>
+            <td>${fmt(e.sortino_ratio)}</td>
+            <td>${fmt(e.calmar_ratio)}</td>
+            <td class="${e.total_return_1yr >= 0 ? 'positive' : 'negative'}">${fmt(e.total_return_1yr, '%')}</td>
+            <td class="yield-col">$${e.available_income_10k != null ? Number(e.available_income_10k).toLocaleString() : '--'}</td>
+            <td class="${e.nav_annual_change >= 0 ? 'positive' : 'negative'}">${fmt(e.nav_annual_change, '%')}</td>
+            <td>${fmt(e.beta_sp500)}</td>
+            <td>${fmt(e.correlation_sp500)}</td>
         </tr>
     `).join('');
 }

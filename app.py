@@ -81,11 +81,15 @@ def list_etfs(
 
 
 @app.get("/api/etfs/new")
-def newest_additions():
+def newest_additions(limit: int = Query(20)):
+    """Return ETFs with the most recent inception dates (dynamic 'newest' list)."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM etfs WHERE is_new = 1 ORDER BY date_added DESC"
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT ticker, name, current_yield, total_return_1yr, inception_date
+        FROM etfs
+        WHERE current_yield IS NOT NULL
+        ORDER BY inception_date DESC LIMIT ?
+    """, (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -141,17 +145,20 @@ def leaderboard():
 
     etf_list = [dict(e) for e in etfs]
 
-    categories["highest_yield"] = sorted(etf_list, key=lambda x: -x["current_yield"])[:10]
-    categories["best_dist_coverage"] = sorted(etf_list, key=lambda x: -x["distribution_coverage"])[:10]
+    def _safe_sort(keyfn, lst, reverse=True):
+        return sorted([x for x in lst if keyfn(x) is not None], key=keyfn, reverse=reverse)
+
+    categories["highest_yield"] = _safe_sort(lambda x: x["current_yield"], etf_list)[:10]
+    categories["best_dist_coverage"] = _safe_sort(lambda x: x["distribution_coverage"], etf_list)[:10]
 
     for period in ["total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr"]:
         valid = [e for e in etf_list if e[period] is not None]
-        categories[f"best_{period}"] = sorted(valid, key=lambda x, p=period: -x[p])[:10]
+        categories[f"best_{period}"] = _safe_sort(lambda x, p=period: x[p], valid)[:10]
 
-    categories["best_sharpe"] = sorted(etf_list, key=lambda x: -x["sharpe_ratio"])[:10]
-    categories["best_sortino"] = sorted(etf_list, key=lambda x: -x["sortino_ratio"])[:10]
-    categories["best_calmar"] = sorted(etf_list, key=lambda x: -x["calmar_ratio"])[:10]
-    categories["best_nav_growth"] = sorted(etf_list, key=lambda x: -x["nav_annual_change"])[:10]
+    categories["best_sharpe"] = _safe_sort(lambda x: x["sharpe_ratio"], etf_list)[:10]
+    categories["best_sortino"] = _safe_sort(lambda x: x["sortino_ratio"], etf_list)[:10]
+    categories["best_calmar"] = _safe_sort(lambda x: x["calmar_ratio"], etf_list)[:10]
+    categories["best_nav_growth"] = _safe_sort(lambda x: x["nav_annual_change"], etf_list)[:10]
 
     ticker_appearances = {}
     for cat_name, cat_etfs in categories.items():
@@ -168,12 +175,12 @@ def leaderboard():
             entries.append({**e, "appearances": count, "tier": tier})
         leaderboard[cat_name] = entries
 
-    yields = [e["current_yield"] for e in etf_list]
-    avg_yield = round(sum(yields) / len(yields), 2)
+    yields = [e["current_yield"] for e in etf_list if e["current_yield"] is not None]
+    avg_yield = round(sum(yields) / len(yields), 2) if yields else 0
     stats = {
         "total_etfs": len(etf_list),
         "avg_yield": avg_yield,
-        "highest_yield": max(yields),
+        "highest_yield": max(yields) if yields else 0,
         "providers": len(set(e["provider"] for e in etf_list)),
     }
 
@@ -517,7 +524,7 @@ def overview_stats():
     avg_yield = conn.execute("SELECT AVG(current_yield) FROM etfs").fetchone()[0]
     providers = conn.execute("SELECT COUNT(DISTINCT provider) FROM etfs").fetchone()[0]
     newest = conn.execute(
-        "SELECT ticker, name, current_yield, total_return_1yr FROM etfs WHERE is_new=1 ORDER BY date_added DESC"
+        "SELECT ticker, name, current_yield, total_return_1yr FROM etfs WHERE current_yield IS NOT NULL ORDER BY inception_date DESC LIMIT 15"
     ).fetchall()
     conn.close()
 

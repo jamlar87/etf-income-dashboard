@@ -38,41 +38,48 @@ def get_all_tickers():
 
 def safe_div_yield(info, etf, current_price):
     """Calculate current dividend yield from yfinance info or dividend history."""
-    # Try trailingAnnualDividendYield first (most reliable)
-    ty = info.get("trailingAnnualDividendYield")
-    if ty and 0.001 < ty < 2.0:
-        return round(ty * 100, 2)
+    best_yield = None
 
-    # Try dividendYield
-    dy = info.get("dividendYield")
-    if dy and 0.001 < dy < 2.0:
-        return round(dy * 100, 2)
+    # Try all yfinance sources first
+    for field in ["trailingAnnualDividendYield", "dividendYield"]:
+        val = info.get(field)
+        if val and 0 < val < 2.0:
+            best_yield = val * 100
+            break
 
-    # Try dividendRate / price
-    dr = info.get("dividendRate")
-    if dr and current_price and dr > 0:
-        return round(dr / current_price * 100, 2)
+    if best_yield is None:
+        dr = info.get("dividendRate")
+        if dr and current_price and dr > 0:
+            best_yield = dr / current_price * 100
 
-    # Try yield field
-    yld = info.get("yield")
-    if yld and 0.001 < yld < 2.0:
-        return round(yld * 100, 2)
+    if best_yield is None and current_price:
+        # Fall back: compute from trailing 12 months of dividends
+        divs = etf.dividends
+        if len(divs) > 0:
+            year_ago = NOW - pd.Timedelta(days=365)
+            recent = divs[divs.index >= year_ago] if len(divs[divs.index >= year_ago]) > 0 else divs.iloc[-12:]
+            if len(recent) > 0:
+                best_yield = recent.sum() / current_price * 100
 
-    # Compute from dividend history
-    divs = etf.dividends
-    if len(divs) > 0 and current_price:
-        year_ago = NOW - pd.Timedelta(days=365)
-        recent = divs[divs.index >= year_ago]
-        if len(recent) > 0:
-            annual = recent.sum()
-            return round(annual / current_price * 100, 2)
-        # Use last 12 distributions
-        last_12 = divs.iloc[-12:]
-        if len(last_12) > 0:
-            annual = last_12.sum()
-            return round(annual / current_price * 100, 2)
+    if best_yield is None:
+        return None
 
-    return None
+    best_yield = round(best_yield, 2)
+
+    # SANITY CHECK: If yield > 50%, cross-verify against actual dividend history
+    # to catch bad yfinance data for traditional dividend ETFs
+    if best_yield > 50 and current_price:
+        divs = etf.dividends
+        if len(divs) >= 12:
+            # Compute yield from actual trailing 12 months of dividends
+            recent = divs[divs.index >= (NOW - pd.Timedelta(days=365))]
+            if len(recent) >= 4:
+                hist_yield = recent.sum() / current_price * 100
+                # If historical calc shows much lower, it's a data error — trust history
+                if hist_yield < best_yield * 0.5:
+                    best_yield = round(hist_yield, 2)
+
+    return best_yield
 
 
 def fetch_ticker_data(ticker):
