@@ -50,6 +50,7 @@ function updateStatus(msg, color) {
 // === INIT — load all sections with timeout ===
 function initDashboard() {
     console.log('Dashboard: starting data load...');
+    initCollapsible();
     watchSections();
 
     // Wire up global period selector
@@ -101,6 +102,46 @@ function initDashboard() {
         const msg = '⚠ Error: ' + (err?.message || String(err)).slice(0, 80);
         updateStatus(msg, 'var(--red)');
         console.error('Dashboard: load error:', err);
+    });
+}
+
+// === COLLAPSIBLE SECTIONS ===
+function initCollapsible() {
+    const STORAGE_KEY = 'etf-dash-collapse';
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch(e) { saved = {}; }
+    document.querySelectorAll('section.scroll-section').forEach(section => {
+        const h1 = section.querySelector('h1');
+        if (!h1) return;
+        // Wrap content after h1 in section-inner
+        const inner = document.createElement('div');
+        inner.className = 'section-inner';
+        let sibling = h1.nextElementSibling;
+        const nodes = [];
+        while (sibling) {
+            nodes.push(sibling);
+            sibling = sibling.nextElementSibling;
+        }
+        nodes.forEach(n => inner.appendChild(n));
+        section.appendChild(inner);
+        // Toggle icon
+        const id = section.id || 'section-' + Math.random().toString(36).slice(2,6);
+        const wrap = document.createElement('span');
+        wrap.className = 'section-toggle';
+        wrap.innerHTML = '<span class="toggle-icon">▼</span> ';
+        h1.parentNode.insertBefore(wrap, h1);
+        wrap.appendChild(h1);
+        // Restore state
+        if (saved[id] === 'collapsed') {
+            inner.classList.add('collapsed');
+            wrap.classList.add('collapsed');
+        }
+        wrap.onclick = () => {
+            const isCollapsed = inner.classList.toggle('collapsed');
+            wrap.classList.toggle('collapsed');
+            saved[id] = isCollapsed ? 'collapsed' : 'expanded';
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch(e) {}
+        };
     });
 }
 

@@ -408,6 +408,45 @@ td.yield-col { color: var(--accent2); font-weight: 600; }
 .stats-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .stat-box { text-align: center; padding: 12px 20px; background: var(--bg); border-radius: var(--radius); min-width: 100px; }
 .stat-val { display: block; font-size: 1.4em; font-weight: 700; color: var(--accent); }
+
+/* Collapsible sections */
+.section-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.section-toggle .toggle-icon {
+    font-size: 0.75em;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+.section-toggle.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+.section-inner {
+    overflow: hidden;
+    transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease;
+    max-height: 20000px;
+    opacity: 1;
+}
+.section-inner.collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+.section-inner > * {
+    transition: opacity 0.25s ease;
+}
+.section-inner.collapsed > * {
+    opacity: 0;
+    pointer-events: none;
+}
 .stat-label { font-size: 0.75em; color: var(--text-dim); margin-top: 3px; }
 
 /* Tab bar */
