@@ -225,6 +225,7 @@ def fetch_ticker_data(ticker):
             "growth_10k": growth,
             "nav_annual_change": nav,
             "inception_date": inception,
+            "expense_ratio": round(info.get("netExpenseRatio", 0) * 100, 2) if info.get("netExpenseRatio") else None,
         }
     except Exception as e:
         print(f"  {ticker}: ERROR - {type(e).__name__}: {e}")
