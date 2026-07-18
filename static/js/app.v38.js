@@ -947,6 +947,23 @@ async function loadReturnChart() {
 async function setupPortfolio() {
     try {
         if (allEtfs.length === 0) allEtfs = await (await fetch(`${API}/etfs`)).json();
+        
+        // Load default portfolio: JEPI, JEPQ, SPYI (matching the video)
+        if (!portfolioEtfs.length && allEtfs.length) {
+            const defaults = ['JEPI', 'JEPQ', 'SPYI'];
+            for (const t of defaults) {
+                const e = allEtfs.find(x => x.ticker === t);
+                if (e) {
+                    portfolioEtfs.push({ ticker: e.ticker, name: e.name, weight: 0, yield: e.current_yield });
+                }
+            }
+            if (portfolioEtfs.length) {
+                const w = Math.floor(100 / portfolioEtfs.length);
+                portfolioEtfs.forEach(p => p.weight = w);
+                portfolioEtfs[0].weight += 100 - w * portfolioEtfs.length;
+            }
+        }
+
         const si = document.getElementById('pf-search');
         const dd = document.getElementById('pf-search-results');
         if (!si || !dd) return;
@@ -979,6 +996,8 @@ async function setupPortfolio() {
         const sim = document.getElementById('pf-simulate');
         if (sim) sim.onclick = simulatePortfolio;
         renderPortfolio();
+        // Auto-simulate default portfolio after DOM is ready
+        if (portfolioEtfs.length) setTimeout(simulatePortfolio, 800);
     } catch(e) { console.warn('setupPortfolio:', e.message); }
 }
 

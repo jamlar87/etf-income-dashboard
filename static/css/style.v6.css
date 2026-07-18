@@ -721,6 +721,19 @@ th .info-tip::before {
     .bp-metric .lbl { font-size: 0.62em; }
     .bp-etf-tag { font-size: 0.65em; padding: 2px 5px; }
 
+    .portfolio-builder { display: flex; flex-direction: column; }
+    .pf-controls { flex-direction: column; align-items: stretch; gap: 10px; }
+    .pf-controls label { width: 100%; flex-wrap: wrap; }
+    .pf-controls input[type="number"] { width: 100%; }
+    .pf-controls input[type="range"] { width: 100%; }
+    .pf-controls select { width: 100%; }
+    .pf-controls .btn { width: 100%; text-align: center; }
+    .pf-results .stats-row { flex-wrap: wrap; gap: 6px; }
+    .pf-results .stat-box { min-width: calc(50% - 6px); padding: 6px 8px; }
+    .pf-results .stat-val { font-size: 0.95em; }
+    .tab-bar { flex-wrap: wrap; gap: 4px; }
+    .tab-bar .tab-btn { flex: 1; min-width: 80px; font-size: 0.72em; padding: 6px 8px; }
+
     .sidebar { width: 85vw; }
 }
 
