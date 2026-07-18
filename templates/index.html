@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>High Yield Income ETF Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
-<link rel="stylesheet" href="/static/css/style.v7.css">
+<link rel="stylesheet" href="/static/css/style.v8.css">
 </head>
 <body>
 <nav class="sidebar" id="sidebar">
@@ -161,6 +161,15 @@
                             </th>
                             <th data-sort="avg_yield_since_inception">Avg Yield
                                 <span class="info-tip" data-tip="Average yield since the ETF's inception. Large gap from current yield may indicate a dividend trap.">ⓘ</span>
+                            </th>
+                            <th data-sort="expense_ratio">Exp Ratio
+                                <span class="info-tip" data-tip="Annual expense ratio — management fees as a percentage of assets. Lower is better for income investors.">ⓘ</span>
+                            </th>
+                            <th data-sort="aum">AUM
+                                <span class="info-tip" data-tip="Assets Under Management in millions. Larger funds tend to be more liquid and stable.">ⓘ</span>
+                            </th>
+                            <th data-sort="is_leveraged">Lev
+                                <span class="info-tip" data-tip="Leveraged or inverse ETF flag. ⚠ denotes leveraged funds — higher risk and decay over time.">ⓘ</span>
                             </th>
                             <th data-sort="distribution_coverage">Dist Cov
                                 <span class="info-tip" data-tip="Distribution coverage ratio = total return ÷ yield. Values between 1-2x are healthy. Below 1x means NAV erosion.">ⓘ</span>
@@ -447,6 +456,6 @@
 
 </main>
 
-<script src="/static/js/app.v42.js" defer></script>
+<script src="/static/js/app.v44.js" defer></script>
 </body>
 </html>

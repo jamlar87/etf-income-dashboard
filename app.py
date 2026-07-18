@@ -128,7 +128,8 @@ def list_etfs(
         "price_return_1yr", "beta_sp500", "correlation_sp500",
         "available_income_10k", "growth_10k", "nav_annual_change",
         "inception_date", "ticker", "name", "provider",
-        "tax_treatment_score", "income_stability_score"
+        "tax_treatment_score", "income_stability_score",
+        "expense_ratio", "aum", "is_leveraged"
     ]
     if sort_by in allowed_sorts:
         direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
@@ -680,7 +681,7 @@ def beta_correlation(period: str = Query("1yr")):
 
 
 @app.get("/api/price-growth")
-def price_growth(period: str = Query("1yr")):
+def price_growth(period: str = Query("1yr"), mode: str = Query("high_income")):
     conn = get_db()
 
     # Determine start date based on period
@@ -690,10 +691,27 @@ def price_growth(period: str = Query("1yr")):
     cutoff = now - timedelta(days=days)
     cutoff_str = cutoff.strftime("%Y-%m-%d")
 
-    # Get all ETF tickers with inception before cutoff
-    rows = conn.execute(
-        "SELECT ticker, name FROM etfs ORDER BY ticker"
-    ).fetchall()
+    # Get tickers based on mode
+    if mode == "full":
+        # Include all tickers that have price_history data plus filtered universe
+        rows = conn.execute("""
+            SELECT DISTINCT u.ticker, u.name
+            FROM etf_universe u
+            LEFT JOIN price_history ph ON u.ticker = ph.ticker
+            WHERE u.is_active = 1
+              AND (
+                ph.ticker IS NOT NULL  -- has price data
+                OR (
+                  (u.is_leveraged IS NULL OR u.is_leveraged = 0)
+                  AND (u.aum IS NOT NULL AND u.aum >= 2000)
+                )
+              )
+            ORDER BY u.ticker
+        """).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT ticker, name FROM etfs ORDER BY ticker"
+        ).fetchall()
     tickers = [r["ticker"] for r in rows]
 
     # Fetch monthly close prices since cutoff

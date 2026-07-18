@@ -193,6 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modeToggle.onchange = () => {
             loadCompare();
             loadBestPortfolios();
+            loadInvestmentGrowth();
         };
     }
     const applyBtn = document.getElementById('q-apply-btn');
@@ -486,6 +487,9 @@ function renderTable() {
             <td>${e.inception_date || '--'}</td>
             <td class="yield-col">${pct(e.current_yield)}</td>
             <td>${pct(e.avg_yield_since_inception) || '--'}</td>
+            <td>${e.expense_ratio != null ? e.expense_ratio.toFixed(2) + '%' : '--'}</td>
+            <td>${e.aum != null ? '$' + (e.aum >= 1000 ? (e.aum/1000).toFixed(1) + 'B' : e.aum.toFixed(0) + 'M') : '--'}</td>
+            <td>${e.is_leveraged == 1 ? '<span style="color:var(--orange);font-weight:bold">⚠</span>' : e.is_leveraged == 0 ? '' : '--'}</td>
             <td class="${e.distribution_coverage >= 1 ? 'positive' : 'negative'}">${fmt(e.distribution_coverage, 'x') || '--'}</td>
             <td class="${(e.tax_treatment_score||0) >= 0.7 ? 'positive' : (e.tax_treatment_score||0) >= 0.3 ? '' : 'negative'}">${e.tax_treatment_score != null ? (e.tax_treatment_score*100).toFixed(0) + '%' : '--'}</td>
             <td class="${(e.income_stability_score||0) >= 0.65 ? 'positive' : (e.income_stability_score||0) >= 0.4 ? '' : 'negative'}">${e.income_stability_score != null ? (e.income_stability_score*100).toFixed(0) + '%' : '--'}</td>
@@ -741,7 +745,7 @@ async function loadInvestmentGrowth() {
         const ctx = canvas.getContext('2d');
         if (growthChart) growthChart.destroy();
 
-        const data = await (await fetch(`${API}/price-growth?period=${currentPeriod}`)).json();
+        const data = await (await fetch(`${API}/price-growth?period=${currentPeriod}&mode=${getUniverseMode()}`)).json();
         console.log('loadInvestmentGrowth: labels=', data.labels?.length, 'datasets=', data.datasets?.length);
         if (!data.labels || data.labels.length === 0) {
             if (statusEl) statusEl.textContent = '⚠ No data available for this period';
