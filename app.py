@@ -1309,6 +1309,13 @@ def _run_monte_carlo(tickers, lookback_months, tax_scores):
 def best_portfolios(
     period: str = Query("1yr"),
     sort_by: str = Query("income"),
+    mode: str = Query("high_income"),
+    exclude_leveraged: bool = Query(True),
+    min_aum: float = Query(2000),
+    max_expense: float = Query(3.0),
+    min_yield: float = Query(0),
+    min_nav_change: float = Query(-10),
+    min_sharpe: float = Query(-10),
 ):
     """Monte Carlo portfolio optimization using real monthly price history."""
     conn = get_db()
@@ -1325,6 +1332,34 @@ def best_portfolios(
     else:
         lookback_months = 12
 
+    # Build mode-specific ticker whitelist
+    if mode == "full":
+        conditions = ["u.is_active = 1"]
+        params = []
+        if exclude_leveraged:
+            conditions.append("(u.is_leveraged IS NULL OR u.is_leveraged = 0)")
+        if min_aum > 0:
+            conditions.append("(u.aum IS NOT NULL AND u.aum >= ?)")
+            params.append(min_aum)
+        if max_expense < 100:
+            conditions.append("(COALESCE(e.expense_ratio, u.expense_ratio) IS NULL OR COALESCE(e.expense_ratio, u.expense_ratio) <= ?)")
+            params.append(max_expense)
+        if min_yield > 0:
+            conditions.append("(COALESCE(e.current_yield, u.current_yield) IS NOT NULL AND COALESCE(e.current_yield, u.current_yield) >= ?)")
+            params.append(min_yield)
+        if min_nav_change > -100:
+            conditions.append("(COALESCE(e.nav_annual_change, u.nav_annual_change) IS NULL OR COALESCE(e.nav_annual_change, u.nav_annual_change) >= ?)")
+            params.append(min_nav_change)
+        if min_sharpe > -10:
+            conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
+            params.append(min_sharpe)
+        where = " AND ".join(conditions)
+        valid_tickers = set(r[0] for r in conn.execute(
+            f"SELECT u.ticker FROM etf_universe u LEFT JOIN etfs e ON u.ticker = e.ticker WHERE {where}", params
+        ).fetchall())
+    else:
+        valid_tickers = set(r[0] for r in conn.execute("SELECT ticker FROM etfs").fetchall())
+
     # Find tickers with sufficient history (have data spanning the lookback period)
     min_rows = max(int(lookback_months * 0.7), 6)
     cutoff_start = f"datetime('now', '-{lookback_months + 2} months')"
@@ -1339,6 +1374,9 @@ def best_portfolios(
     """).fetchall()
 
     eligible = [r["ticker"] for r in rows]
+    # Filter to mode-appropriate tickers
+    mode_eligible = [t for t in eligible if t in valid_tickers]
+    eligible = mode_eligible
     if len(eligible) < 4:
         conn.close()
         return {"portfolios": [], "eligible_etfs": len(eligible), "period": period}
@@ -1360,14 +1398,21 @@ def best_portfolios(
     tax_rows = conn2.execute(
         "SELECT ticker, tax_treatment_score FROM etfs WHERE tax_treatment_score IS NOT NULL"
     ).fetchall()
+    uni_tax_rows = conn2.execute(
+        "SELECT ticker, tax_treatment_score FROM etf_universe WHERE tax_treatment_score IS NOT NULL"
+    ).fetchall()
     tax_scores = {r["ticker"]: r["tax_treatment_score"] for r in tax_rows}
+    # Fill in any missing from universe
+    for r in uni_tax_rows:
+        if r["ticker"] not in tax_scores:
+            tax_scores[r["ticker"]] = r["tax_treatment_score"]
     conn2.close()
 
     if len(recent_tickers) < 4:
         return {"portfolios": [], "eligible_etfs": len(recent_tickers), "period": period}
 
-    # If already cached for this period, reuse
-    cache_key = f"best_portfolios_{lookback_months}"
+    # If already cached for this period & mode, reuse
+    cache_key = f"best_portfolios_{lookback_months}_{mode}"
     if cache_key not in _best_pf_cache:
         # Check disk cache first (cross-session persistence)
         disk_data = _load_cache_from_disk(cache_key)
