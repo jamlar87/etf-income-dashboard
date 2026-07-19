@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Download monthly price history for filtered universe ETFs (~600 tickers).
-Batch-commits every 50 tickers to survive mid-run kills."""
+"""Download/extend monthly price history for filtered universe ETFs (~600 tickers).
+Runs incrementally — existing rows are skipped (INSERT OR IGNORE)."""
 import sqlite3
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,18 +22,15 @@ def get_db():
 
 
 def get_tickers_to_download():
-    """Return tickers from filtered universe that lack price history."""
+    """Return tickers from filtered universe (incremental — all with price history)."""
     conn = get_db()
     rows = conn.execute("""
-        SELECT u.ticker
+        SELECT DISTINCT u.ticker
         FROM etf_universe u
-        LEFT JOIN etfs e ON u.ticker = e.ticker
+        INNER JOIN price_history p ON u.ticker = p.ticker
         WHERE u.is_active = 1
           AND (u.is_leveraged IS NULL OR u.is_leveraged = 0)
           AND u.aum IS NOT NULL AND u.aum >= 2000
-          AND (COALESCE(e.expense_ratio, u.expense_ratio) IS NULL
-               OR COALESCE(e.expense_ratio, u.expense_ratio) <= 3.0)
-          AND u.ticker NOT IN (SELECT ticker FROM price_history)
         ORDER BY u.aum DESC
     """).fetchall()
     conn.close()
@@ -41,12 +38,13 @@ def get_tickers_to_download():
 
 
 def download_ticker(ticker):
-    """Download monthly close + dividends. Returns list of rows or None."""
+    """Download monthly close + dividends (max period). Return list of rows or None."""
     try:
-        hist = yf.Ticker(ticker).history(period="5y", interval="1mo")
+        etf = yf.Ticker(ticker)
+        hist = etf.history(period="max", interval="1mo")
         if hist.empty or hist["Close"].isna().all():
-            # Fallback: daily aggregation
-            daily = yf.Ticker(ticker).history(period="5y", interval="1d")
+            # Fallback: daily -> monthly resample
+            daily = etf.history(period="max", interval="1d")
             if daily.empty:
                 return None
             hist = daily.resample("ME").agg({
@@ -59,13 +57,15 @@ def download_ticker(ticker):
 
         rows = []
         for idx, row in hist.iterrows():
+            dt = idx.to_pydatetime() if hasattr(idx, 'to_pydatetime') else idx
+            date_str = dt.strftime("%Y-%m-01")
             close = float(row["Close"]) if pd.notna(row["Close"]) else None
             div = float(row.get("Dividends", 0) or 0)
-            if close is not None and close == close:  # not NaN
-                rows.append((ticker, idx.strftime("%Y-%m-%d"), close, div))
+            if close is not None and close == close:
+                rows.append((ticker, date_str, close, div))
 
         if rows:
-            print(f"  {ticker}: {len(rows)} months")
+            print(f"  {ticker}: {len(rows)} months ({rows[0][1]} to {rows[-1][1]})")
         return rows
     except Exception as e:
         print(f"  {ticker}: ERROR - {e}")
@@ -73,7 +73,7 @@ def download_ticker(ticker):
 
 
 def store_batch(conn, all_rows):
-    """Insert all collected rows, commit, return count."""
+    """Insert rows with INSERT OR IGNORE (safety for duplicates)."""
     total = 0
     for ticker_rows in all_rows:
         if not ticker_rows:
@@ -93,11 +93,7 @@ def store_batch(conn, all_rows):
 
 def main():
     tickers = get_tickers_to_download()
-    print(f"Filtered universe: {len(tickers)} tickers need price history download")
-
-    if not tickers:
-        print("All tickers already have history. Nothing to do.")
-        return
+    print(f"Extending history for {len(tickers)} tickers (period=max, incremental)...\n")
 
     conn = get_db()
     conn.execute("PRAGMA journal_mode=WAL")
@@ -107,7 +103,6 @@ def main():
     good = 0
     failed = 0
 
-    # Process in batches
     for batch_start in range(0, len(tickers), BATCH_SIZE):
         batch = tickers[batch_start:batch_start + BATCH_SIZE]
         print(f"\n--- Batch {batch_start // BATCH_SIZE + 1}: {batch[0]}..{batch[-1]} ({len(batch)} tickers) ---")
@@ -118,7 +113,7 @@ def main():
             for f in as_completed(futures):
                 t = futures[f]
                 try:
-                    rows = f.result(timeout=90)
+                    rows = f.result(timeout=120)
                     if rows:
                         good += 1
                         batch_rows.append(rows)
@@ -131,8 +126,7 @@ def main():
 
         stored = store_batch(conn, batch_rows)
         total_stored += stored
-        progress = f"  → Batch complete: {stored} rows stored. Total: {total_stored} rows, {good} good, {failed} failed"
-        print(progress)
+        print(f"  → Batch: {stored} new rows. Total: {total_stored} rows added")
 
     conn.close()
 
@@ -141,10 +135,10 @@ def main():
     r = conn2.execute(
         "SELECT COUNT(DISTINCT ticker) as t, COUNT(*) as n, MAX(date) as latest FROM price_history"
     ).fetchone()
-    print(f"\n{'='*50}")
-    print(f"Done. {good} succeeded, {failed} failed, {total_stored} total rows stored.")
-    print(f"DB now: {r[0]} tickers, {r[1]} rows, latest: {r[2]}")
     conn2.close()
+    print(f"\n{'='*50}")
+    print(f"Done. {good} tickers extended, {failed} failed.")
+    print(f"DB now: {r[0]} tickers, {r[1]} rows, latest: {r[2]}")
 
 
 if __name__ == "__main__":
