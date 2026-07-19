@@ -238,7 +238,9 @@ def list_etfs(
         "tax_treatment_score", "income_stability_score",
         "expense_ratio", "aum", "is_leveraged"
     ]
-    if sort_by in allowed_sorts:
+    # Derived fields are computed AFTER the query, so SQL cannot ORDER BY them.
+    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "risk_adjusted"}}
+    if sort_by in sql_sort_fields:
         direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
         query += f" ORDER BY {sort_by} {direction} NULLS LAST"
     else:
@@ -343,8 +345,9 @@ def list_universe(
         "total_return_5yr", "total_return_10yr", "sortino_ratio", "calmar_ratio",
     ]
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
-    # Use bare column name (COALESCE alias) — NO prefix, since both tables have the same columns
-    order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in allowed_sorts else "ORDER BY current_yield DESC"
+    # Derived fields computed after query — SQL cannot ORDER BY them (Python re-sorts below)
+    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "risk_adjusted"}}
+    order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in sql_sort_fields else "ORDER BY current_yield DESC"
 
     # LEFT JOIN with etfs table so high-income tickers get all their enriched fields
     # Wrap in subquery so ORDER BY references unambiguous output column aliases
