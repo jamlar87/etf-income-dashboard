@@ -156,7 +156,11 @@
                 <label>
                     <input type="checkbox" id="sort-desc" checked> Descending
                 </label>
-                <label>Tax Rate:
+                <label>Account:
+                    <label><input type="radio" name="acct-type" value="taxable" checked> Taxable</label>
+                    <label><input type="radio" name="acct-type" value="ira"> IRA</label>
+                </label>
+                <label>Tax %:
                     <input type="number" id="tax-rate" value="20" min="0" max="50" step="1" style="width:48px;padding:2px">%
                 </label>
             </div>
@@ -222,6 +226,12 @@
                             <th data-sort="real_yield">Real Yld
                                 <span class="info-tip" data-tip="Total return to the holder = Yield + NAV Change. This is what you actually kept. Negative means NAV erosion ate your distribution — you lost money despite the yield.">ⓘ</span>
                             </th>
+                            <th data-sort="net_real_yield">Net Real Yld
+                                <span class="info-tip" data-tip="Real Yield minus the expense ratio. The expense drag silently eats both yield and NAV growth.">ⓘ</span>
+                            </th>
+                            <th data-sort="quality_score">Quality
+                                <span class="info-tip" data-tip="Income-quality composite (0-100): weighted blend of real yield (40%), Sharpe (20%), tax treatment (15%), income stability (15%), expense (10%, inverted). Higher = better overall income investment.">ⓘ</span>
+                            </th>
                             <th data-sort="beta_sp500">Beta
                                 <span class="info-tip" data-tip="Beta vs S&P 500. Measures magnitude of price movement relative to the market. Above 1 = more volatile than the market.">ⓘ</span>
                             </th>
@@ -233,6 +243,21 @@
                     <tbody></tbody>
                 </table>
             </div>
+        </div>
+
+        <!-- BASKET BUILDER (F1) -->
+        <div class="card">
+            <h2>🧺 Portfolio Basket Builder
+                <span class="info-tip" data-tip="Select ETFs in the table above using the checkbox column, then click Build Basket to see blended metrics (yield, real yield, quality score, drawdown, diversification).">ⓘ</span>
+            </h2>
+            <div class="basket-controls">
+                <span id="basket-count">Selected: 0</span>
+                <label><input type="radio" name="acct-type" value="taxable" checked> Taxable</label>
+                <label><input type="radio" name="acct-type" value="ira"> IRA</label>
+                <label>Tax %: <input type="number" id="tax-rate" value="20" min="0" max="50" step="1" style="width:48px;padding:2px">%</label>
+                <button class="build-basket-btn">Build Basket</button>
+            </div>
+            <div id="basket-result"></div>
         </div>
 
         <!-- INVESTMENT GROWTH CHART -->

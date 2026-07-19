@@ -184,13 +184,15 @@ def _compute_live_metrics(conn):
 
 
 def _enrich_derived(d, tax_rate=0.20):
-    """Add after-tax yield, real yield (yield net NAV erosion), and a
-    risk-adjusted income score to an ETF dict. Pure compute from existing
-    columns — no DB access. tax_rate is a flat ordinary-income estimate
-    (default 20%); ROC/qualified-dividend nuance is NOT modeled."""
+    """Add derived income-quality metrics to an ETF dict. Pure compute from
+    existing columns — no DB access. tax_rate is a flat ordinary-income
+    estimate (default 20%); ROC/qualified-dividend nuance is NOT modeled."""
     yld = d.get("current_yield")
     nav = d.get("nav_annual_change")
     sharpe = d.get("sharpe_ratio")
+    expense = d.get("expense_ratio")
+    tax_score = d.get("tax_treatment_score")
+    stab_score = d.get("income_stability_score")
     if yld is not None:
         d["after_tax_yield"] = round(yld * (1.0 - tax_rate), 2)
     else:
@@ -200,11 +202,32 @@ def _enrich_derived(d, tax_rate=0.20):
         d["real_yield"] = round(yld + nav, 2)
     else:
         d["real_yield"] = None
+    # Net real yield = real yield minus expense drag (F2)
+    if d["real_yield"] is not None and expense is not None:
+        d["net_real_yield"] = round(d["real_yield"] - expense, 2)
+    else:
+        d["net_real_yield"] = None
     # Risk-adjusted income = real yield x max(sharpe, 0)
     if d["real_yield"] is not None and sharpe is not None:
         d["risk_adjusted"] = round(d["real_yield"] * max(sharpe, 0.0), 2)
     else:
         d["risk_adjusted"] = None
+    # Income-quality composite 0-100 (F6): weighted blend of normalized signals
+    # real_yield 40%, sharpe 20%, tax 15%, stability 15%, expense 10% (inverted)
+    parts = []
+    if d["real_yield"] is not None:
+        # normalize real_yield: 0%->0, 15%+->100 (clamp)
+        parts.append((min(max(d["real_yield"], 0), 15) / 15.0) * 100 * 0.40)
+    if sharpe is not None:
+        parts.append((min(max(sharpe, 0), 2) / 2.0) * 100 * 0.20)
+    if tax_score is not None:
+        parts.append(min(max(tax_score, 0), 1) * 100 * 0.15)
+    if stab_score is not None:
+        parts.append(min(max(stab_score, 0), 1) * 100 * 0.15)
+    if expense is not None:
+        # expense: 0%->100, 1%+->0 (invert, clamp)
+        parts.append((min(max(1.0 - expense, 0), 1) / 1.0) * 100 * 0.10)
+    d["quality_score"] = round(sum(parts), 1) if parts else None
     return d
 
 
@@ -228,7 +251,8 @@ def list_etfs(
         params.append(category)
 
     allowed_sorts = [
-        "current_yield", "after_tax_yield", "real_yield", "risk_adjusted",
+        "current_yield", "after_tax_yield", "real_yield", "net_real_yield",
+        "risk_adjusted", "quality_score",
         "avg_yield_since_inception", "distribution_coverage",
         "sharpe_ratio", "sortino_ratio", "calmar_ratio",
         "total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr",
@@ -239,7 +263,7 @@ def list_etfs(
         "expense_ratio", "aum", "is_leveraged"
     ]
     # Derived fields are computed AFTER the query, so SQL cannot ORDER BY them.
-    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "risk_adjusted"}}
+    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "net_real_yield", "risk_adjusted", "quality_score"}}
     if sort_by in sql_sort_fields:
         direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
         query += f" ORDER BY {sort_by} {direction} NULLS LAST"
@@ -337,7 +361,8 @@ def list_universe(
     total_filtered = conn.execute(count_sql, params).fetchone()[0]
 
     allowed_sorts = [
-        "current_yield", "after_tax_yield", "real_yield", "risk_adjusted",
+        "current_yield", "after_tax_yield", "real_yield", "net_real_yield",
+        "risk_adjusted", "quality_score",
         "expense_ratio", "total_return_1yr",
         "nav_annual_change", "aum", "sharpe_ratio", "tax_treatment_score",
         "income_stability_score", "ticker", "name", "asset_class",
@@ -346,7 +371,7 @@ def list_universe(
     ]
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     # Derived fields computed after query — SQL cannot ORDER BY them (Python re-sorts below)
-    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "risk_adjusted"}}
+    sql_sort_fields = {f for f in allowed_sorts if f not in {"after_tax_yield", "real_yield", "net_real_yield", "risk_adjusted", "quality_score"}}
     order_clause = f"ORDER BY {sort_by} {direction} NULLS LAST" if sort_by in sql_sort_fields else "ORDER BY current_yield DESC"
 
     # LEFT JOIN with etfs table so high-income tickers get all their enriched fields
@@ -1709,6 +1734,98 @@ def overview_stats():
         "total_providers": providers,
         "newest_additions": newest_list,
     }
+
+
+@app.get("/api/basket")
+def basket(tickers: str = Query(""), tax_rate: float = Query(0.20)):
+    """Blended metrics for a user-selected basket of ETFs (F1). Also computes
+    per-ticker max drawdown + dividend-cut count from price_history (F4)."""
+    conn = get_db()
+    symbol_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not symbol_list:
+        conn.close()
+        return {"tickers": [], "blended": None, "holdings": []}
+
+    placeholders = ",".join("?" * len(symbol_list))
+    rows = conn.execute(f"""
+        SELECT * FROM (
+            SELECT
+                u.ticker,
+                COALESCE(e.name, u.name) AS name,
+                COALESCE(e.provider, u.provider) AS provider,
+                COALESCE(e.current_yield, u.current_yield) AS current_yield,
+                COALESCE(e.nav_annual_change, u.nav_annual_change) AS nav_annual_change,
+                COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
+                COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
+                COALESCE(e.tax_treatment_score, u.tax_treatment_score) AS tax_treatment_score,
+                COALESCE(e.income_stability_score, u.income_stability_score) AS income_stability_score,
+                COALESCE(e.correlation_sp500, u.correlation_sp500) AS correlation_sp500,
+                COALESCE(e.real_yield, u.real_yield) AS real_yield_stored
+            FROM etf_universe u
+            LEFT JOIN etfs e ON u.ticker = e.ticker
+            WHERE u.ticker IN ({placeholders})
+        )
+    """, symbol_list).fetchall()
+
+    holdings = []
+    for r in rows:
+        d = dict(r)
+        _enrich_derived(d, tax_rate)
+        # Drawdown + div-cut from price_history (F4)
+        ph = conn.execute(
+            "SELECT date, close, dividend FROM price_history WHERE ticker=? ORDER BY date",
+            (d["ticker"],)
+        ).fetchall()
+        closes = [x["close"] for x in ph if x["close"] and x["close"] > 0]
+        divs = [x["dividend"] or 0 for x in ph]
+        max_dd = None
+        if len(closes) >= 2:
+            peak = closes[0]
+            worst = 0.0
+            for c in closes:
+                if c > peak:
+                    peak = c
+                dd = (c - peak) / peak
+                if dd < worst:
+                    worst = dd
+            max_dd = round(worst * 100, 1)
+        div_cuts = 0
+        for i in range(1, len(divs)):
+            if divs[i - 1] and divs[i] >= 0 and divs[i] < divs[i - 1] * 0.8:
+                div_cuts += 1
+        d["max_drawdown"] = max_dd
+        d["div_cuts_12m"] = div_cuts
+        d["is_trap"] = bool((d["real_yield"] is not None and d["real_yield"] < 0) or div_cuts > 0)
+        holdings.append(d)
+
+    conn.close()
+
+    if not holdings:
+        return {"tickers": symbol_list, "blended": None, "holdings": []}
+
+    n = len(holdings)
+    def avg(key):
+        vals = [h[key] for h in holdings if h.get(key) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+    def avg_corr():
+        # average pairwise correlation; if single holding, use its own corr vs mkt
+        corrs = [h["correlation_sp500"] for h in holdings if h.get("correlation_sp500") is not None]
+        return round(sum(corrs) / len(corrs), 2) if corrs else None
+
+    blended = {
+        "count": n,
+        "current_yield": avg("current_yield"),
+        "after_tax_yield": avg("after_tax_yield"),
+        "real_yield": avg("real_yield"),
+        "net_real_yield": avg("net_real_yield"),
+        "quality_score": avg("quality_score"),
+        "avg_sharpe": avg("sharpe_ratio"),
+        "avg_expense": avg("expense_ratio"),
+        "avg_correlation_sp500": avg_corr(),
+        "avg_max_drawdown": avg("max_drawdown"),
+        "trap_count": sum(1 for h in holdings if h["is_trap"]),
+    }
+    return {"tickers": symbol_list, "blended": blended, "holdings": holdings}
 
 
 if __name__ == "__main__":
