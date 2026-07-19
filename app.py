@@ -53,20 +53,22 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _prewarm_caches():
-    """Build common best-portfolios caches in background on startup."""
+    """Build all best-portfolios caches in background on startup."""
     import urllib.request
     base = f"http://127.0.0.1:{os.environ.get('PORT', '8500')}"
+    periods = ["1yr", "3yr", "5yr", "10yr", "15yr", "20yr"]
     modes = [
-        "/api/best-portfolios?period=1yr&sort_by=income&mode=high_income",
-        "/api/best-portfolios?period=1yr&sort_by=income&mode=full&min_aum=2000&exclude_leveraged=true",
-        "/api/best-portfolios?period=3yr&sort_by=income&mode=high_income",
+        ("high_income", "/api/best-portfolios?period={p}&sort_by=income&mode=high_income"),
+        ("full",       "/api/best-portfolios?period={p}&sort_by=income&mode=full&min_aum=2000&exclude_leveraged=true"),
     ]
-    for path in modes:
-        try:
-            urllib.request.urlopen(f"{base}{path}", timeout=300)
-            print(f"  Pre-warmed: {path[:60]}...")
-        except Exception as e:
-            print(f"  Pre-warm failed: {path[:60]}... — {e}")
+    for period in periods:
+        for label, template in modes:
+            path = template.format(p=period)
+            try:
+                urllib.request.urlopen(f"{base}{path}", timeout=600)
+                print(f"  Pre-warmed: {label} {period}")
+            except Exception as e:
+                print(f"  Pre-warm failed: {label} {period} — {e}")
 
 
 def _cleanup_stale_caches():
