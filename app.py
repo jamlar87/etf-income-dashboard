@@ -173,6 +173,8 @@ def list_universe(
     min_history_months: int = Query(0),
     min_tax_score: float = Query(0),
     min_sharpe: float = Query(-10),
+    min_div_payments: int = Query(0),
+    max_nav_erosion_pct: float = Query(100),
     sort_by: str = Query("current_yield"),
     sort_dir: str = Query("desc"),
     limit: int = Query(500),
@@ -206,6 +208,15 @@ def list_universe(
         if min_sharpe > -10:
             conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
             params.append(min_sharpe)
+        if min_div_payments > 0:
+            conditions.append("(u.div_payments_12m IS NOT NULL AND u.div_payments_12m >= ?)")
+            params.append(min_div_payments)
+        if max_nav_erosion_pct < 100:
+            conditions.append(f"""(COALESCE(e.total_return_1yr, u.total_return_1yr) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) = 0
+                OR COALESCE(e.total_return_1yr, u.total_return_1yr) >= COALESCE(e.current_yield, u.current_yield) * (1.0 - ? / 100.0))""")
+            params.append(max_nav_erosion_pct)
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -432,6 +443,8 @@ def leaderboard(
     min_yield: float = Query(0),
     min_nav_change: float = Query(-10),
     min_sharpe: float = Query(-10),
+    min_div_payments: int = Query(0),
+    max_nav_erosion_pct: float = Query(100),
 ):
     conn = get_db()
     
@@ -456,6 +469,15 @@ def leaderboard(
         if min_sharpe > -10:
             conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
             params.append(min_sharpe)
+        if min_div_payments > 0:
+            conditions.append("(u.div_payments_12m IS NOT NULL AND u.div_payments_12m >= ?)")
+            params.append(min_div_payments)
+        if max_nav_erosion_pct < 100:
+            conditions.append(f"""((COALESCE(e.total_return_1yr, u.total_return_1yr) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) = 0
+                OR COALESCE(e.total_return_1yr, u.total_return_1yr) >= COALESCE(e.current_yield, u.current_yield) * (1.0 - ? / 100.0))""")
+            params.append(max_nav_erosion_pct)
         
         where = " AND ".join(conditions) if conditions else "1=1"
         
@@ -647,6 +669,8 @@ def beta_correlation(
     min_yield: float = Query(0),
     min_nav_change: float = Query(-10),
     min_sharpe: float = Query(-10),
+    min_div_payments: int = Query(0),
+    max_nav_erosion_pct: float = Query(100),
 ):
     conn = get_db()
 
@@ -670,6 +694,15 @@ def beta_correlation(
         if min_sharpe > -10:
             conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
             params.append(min_sharpe)
+        if min_div_payments > 0:
+            conditions.append("(u.div_payments_12m IS NOT NULL AND u.div_payments_12m >= ?)")
+            params.append(min_div_payments)
+        if max_nav_erosion_pct < 100:
+            conditions.append(f"""((COALESCE(e.total_return_1yr, u.total_return_1yr) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) = 0
+                OR COALESCE(e.total_return_1yr, u.total_return_1yr) >= COALESCE(e.current_yield, u.current_yield) * (1.0 - ? / 100.0))""")
+            params.append(max_nav_erosion_pct)
         where = " AND ".join(conditions)
         rows = conn.execute(f"""
             SELECT u.ticker, COALESCE(e.name, u.name) AS name, COALESCE(e.provider, u.provider) AS provider,
@@ -1316,6 +1349,8 @@ def best_portfolios(
     min_yield: float = Query(0),
     min_nav_change: float = Query(-10),
     min_sharpe: float = Query(-10),
+    min_div_payments: int = Query(0),
+    max_nav_erosion_pct: float = Query(100),
 ):
     """Monte Carlo portfolio optimization using real monthly price history."""
     conn = get_db()
@@ -1353,6 +1388,15 @@ def best_portfolios(
         if min_sharpe > -10:
             conditions.append("(COALESCE(e.sharpe_ratio, u.sharpe_ratio) IS NULL OR COALESCE(e.sharpe_ratio, u.sharpe_ratio) >= ?)")
             params.append(min_sharpe)
+        if min_div_payments > 0:
+            conditions.append("(u.div_payments_12m IS NOT NULL AND u.div_payments_12m >= ?)")
+            params.append(min_div_payments)
+        if max_nav_erosion_pct < 100:
+            conditions.append(f"""((COALESCE(e.total_return_1yr, u.total_return_1yr) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) IS NULL
+                OR COALESCE(e.current_yield, u.current_yield) = 0
+                OR COALESCE(e.total_return_1yr, u.total_return_1yr) >= COALESCE(e.current_yield, u.current_yield) * (1.0 - ? / 100.0))""")
+            params.append(max_nav_erosion_pct)
         where = " AND ".join(conditions)
         valid_tickers = set(r[0] for r in conn.execute(
             f"SELECT u.ticker FROM etf_universe u LEFT JOIN etfs e ON u.ticker = e.ticker WHERE {where}", params
