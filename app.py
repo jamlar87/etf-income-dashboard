@@ -5,6 +5,7 @@ import math
 import json
 import os
 import time
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from functools import lru_cache
@@ -13,8 +14,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from starlette.requests import Request
-import json
-import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
@@ -45,6 +44,85 @@ def get_db():
 async def index(request: Request):
     template = _env.get_template("index.html")
     return HTMLResponse(template.render({"request": request}))
+
+
+# Service start time for uptime tracking
+_START_TIME = time.time()
+CACHE_DIR = Path("/media/james/SlowDisk1tb/etf-dashboard/") if os.path.exists("/media/james/SlowDisk1tb/etf-dashboard/") else Path(BASE_DIR)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _prewarm_caches():
+    """Build common best-portfolios caches in background on startup."""
+    import urllib.request
+    base = f"http://127.0.0.1:{os.environ.get('PORT', '8500')}"
+    modes = [
+        "/api/best-portfolios?period=1yr&sort_by=income&mode=high_income",
+        "/api/best-portfolios?period=1yr&sort_by=income&mode=full&min_aum=2000&exclude_leveraged=true",
+        "/api/best-portfolios?period=3yr&sort_by=income&mode=high_income",
+    ]
+    for path in modes:
+        try:
+            urllib.request.urlopen(f"{base}{path}", timeout=300)
+            print(f"  Pre-warmed: {path[:60]}...")
+        except Exception as e:
+            print(f"  Pre-warm failed: {path[:60]}... — {e}")
+
+
+def _cleanup_stale_caches():
+    """Remove cache files older than 7 days to free disk space."""
+    now = time.time()
+    cutoff = now - 7 * 86400
+    removed = 0
+    for f in CACHE_DIR.glob("best_portfolios_*.json"):
+        if f.stat().st_mtime < cutoff:
+            f.unlink()
+            removed += 1
+    if removed:
+        print(f"  Cleaned {removed} stale cache file(s)")
+
+
+@app.on_event("startup")
+async def startup():
+    # Clean stale caches, then pre-warm common ones in background
+    _cleanup_stale_caches()
+    t = threading.Thread(target=_prewarm_caches, daemon=True)
+    t.start()
+
+
+@app.get("/api/health")
+def health():
+    conn = get_db()
+    try:
+        etf_count = conn.execute("SELECT COUNT(*) FROM etfs").fetchone()[0]
+        universe_count = conn.execute("SELECT COUNT(*) FROM etf_universe WHERE is_active = 1").fetchone()[0]
+        price_tickers = conn.execute("SELECT COUNT(DISTINCT ticker) FROM price_history").fetchone()[0]
+        price_rows = conn.execute("SELECT COUNT(*) FROM price_history").fetchone()[0]
+        last_date = conn.execute("SELECT MAX(date) FROM price_history").fetchone()[0]
+        
+        # Cache info
+        cache_files = list(CACHE_DIR.glob("best_portfolios_*.json"))
+        cache_info = {}
+        for f in cache_files:
+            age_h = (time.time() - f.stat().st_mtime) / 3600
+            cache_info[f.stem] = {"size_kb": round(f.stat().st_size / 1024, 1), "age_hours": round(age_h, 1)}
+        
+        return {
+            "status": "ok",
+            "uptime_hours": round((time.time() - _START_TIME) / 3600, 2),
+            "database": {
+                "path": DB_PATH,
+                "curated_etfs": etf_count,
+                "universe_etfs": universe_count,
+                "price_tickers": price_tickers,
+                "price_rows": price_rows,
+                "last_price_date": last_date,
+            },
+            "caches": cache_info,
+            "filtered_universe_size": universe_count,
+        }
+    finally:
+        conn.close()
 
 
 def _compute_live_metrics(conn):
@@ -1171,8 +1249,6 @@ def simulate_portfolio(data: dict):
 
 # Cache for Monte Carlo results — persisted to disk for cross-session reuse
 _best_pf_cache = {}
-CACHE_DIR = Path("/media/james/SlowDisk1tb/etf-dashboard")
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def _load_cache_from_disk(cache_key):
     """Try to load cached Monte Carlo results from disk.
