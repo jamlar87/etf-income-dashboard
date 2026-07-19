@@ -183,11 +183,37 @@ def _compute_live_metrics(conn):
     return result
 
 
+def _enrich_derived(d, tax_rate=0.20):
+    """Add after-tax yield, real yield (yield net NAV erosion), and a
+    risk-adjusted income score to an ETF dict. Pure compute from existing
+    columns — no DB access. tax_rate is a flat ordinary-income estimate
+    (default 20%); ROC/qualified-dividend nuance is NOT modeled."""
+    yld = d.get("current_yield")
+    nav = d.get("nav_annual_change")
+    sharpe = d.get("sharpe_ratio")
+    if yld is not None:
+        d["after_tax_yield"] = round(yld * (1.0 - tax_rate), 2)
+    else:
+        d["after_tax_yield"] = None
+    # Real yield = total return to holder = yield + NAV change
+    if yld is not None and nav is not None:
+        d["real_yield"] = round(yld + nav, 2)
+    else:
+        d["real_yield"] = None
+    # Risk-adjusted income = real yield x max(sharpe, 0)
+    if d["real_yield"] is not None and sharpe is not None:
+        d["risk_adjusted"] = round(d["real_yield"] * max(sharpe, 0.0), 2)
+    else:
+        d["risk_adjusted"] = None
+    return d
+
+
 @app.get("/api/etfs")
 def list_etfs(
     provider: str = Query(None),
     category: str = Query(None),
-    sort_by: str = Query("current_yield"),
+    tax_rate: float = Query(0.20),
+    sort_by: str = Query("risk_adjusted"),
     sort_dir: str = Query("desc"),
 ):
     conn = get_db()
@@ -202,7 +228,8 @@ def list_etfs(
         params.append(category)
 
     allowed_sorts = [
-        "current_yield", "avg_yield_since_inception", "distribution_coverage",
+        "current_yield", "after_tax_yield", "real_yield", "risk_adjusted",
+        "avg_yield_since_inception", "distribution_coverage",
         "sharpe_ratio", "sortino_ratio", "calmar_ratio",
         "total_return_1yr", "total_return_3yr", "total_return_5yr", "total_return_10yr",
         "price_return_1yr", "beta_sp500", "correlation_sp500",
@@ -231,10 +258,12 @@ def list_etfs(
         t = d["ticker"]
         if t in live:
             d.update(live[t])
+        _enrich_derived(d, tax_rate)
         result.append(d)
     
-    # Python-side sort for yield-derived fields (so sort uses live values)
-    if sort_by in override_fields:
+    # Python-side sort for yield-derived + computed fields (not in SQL)
+    derived_sort_fields = override_fields | {"after_tax_yield", "real_yield", "risk_adjusted"}
+    if sort_by in derived_sort_fields:
         direction = sort_dir.lower() == "desc"
         result.sort(key=lambda x: x.get(sort_by) if x.get(sort_by) is not None else (-1 if direction else 99999), reverse=direction)
     
@@ -244,6 +273,7 @@ def list_etfs(
 @app.get("/api/universe")
 def list_universe(
     mode: str = Query("full"),
+    tax_rate: float = Query(0.20),
     exclude_leveraged: bool = Query(True),
     min_nav_change: float = Query(-10),
     min_aum: float = Query(2000),
@@ -255,7 +285,7 @@ def list_universe(
     min_sharpe: float = Query(-10),
     min_div_payments: int = Query(0),
     max_nav_erosion_pct: float = Query(100),
-    sort_by: str = Query("current_yield"),
+    sort_by: str = Query("risk_adjusted"),
     sort_dir: str = Query("desc"),
     limit: int = Query(500),
     offset: int = Query(0),
@@ -305,7 +335,8 @@ def list_universe(
     total_filtered = conn.execute(count_sql, params).fetchone()[0]
 
     allowed_sorts = [
-        "current_yield", "expense_ratio", "total_return_1yr",
+        "current_yield", "after_tax_yield", "real_yield", "risk_adjusted",
+        "expense_ratio", "total_return_1yr",
         "nav_annual_change", "aum", "sharpe_ratio", "tax_treatment_score",
         "income_stability_score", "ticker", "name", "asset_class",
         "distribution_coverage", "beta_sp500", "total_return_3yr",
@@ -362,13 +393,26 @@ def list_universe(
     rows = conn.execute(query, params + [limit, offset]).fetchall()
     conn.close()
 
+    # Enrich with derived fields (after-tax yield, real yield, risk-adjusted)
+    enriched = [_enrich_derived(dict(r), tax_rate) for r in rows]
+
+    # SQL cannot sort by computed fields; re-sort in Python when needed
+    derived_sort_fields = {"after_tax_yield", "real_yield", "risk_adjusted"}
+    if sort_by in derived_sort_fields:
+        direction = sort_dir.lower() == "desc"
+        enriched.sort(
+            key=lambda x: x.get(sort_by) if x.get(sort_by) is not None else (-1 if direction else 99999),
+            reverse=direction,
+        )
+
     return {
         "total": total_raw,
         "filtered": total_filtered,
-        "returned": len(rows),
+        "returned": len(enriched),
         "mode": mode,
         "filters": {
             "exclude_leveraged": exclude_leveraged,
+            "tax_rate": tax_rate,
             "min_nav_change": min_nav_change,
             "min_aum": min_aum,
             "max_expense": max_expense,
@@ -377,7 +421,7 @@ def list_universe(
             "min_history_months": min_history_months,
             "min_sharpe": min_sharpe,
         },
-        "etfs": [dict(r) for r in rows],
+        "etfs": enriched,
     }
 
 
@@ -517,6 +561,7 @@ def list_categories():
 def leaderboard(
     period: str = Query("1yr"),
     mode: str = Query("high_income"),
+    tax_rate: float = Query(0.20),
     exclude_leveraged: bool = Query(True),
     min_aum: float = Query(2000),
     max_expense: float = Query(3.0),
@@ -612,6 +657,8 @@ def leaderboard(
             etf_list.append(d)
     
     conn.close()
+    # Enrich every ETF with derived fields (after-tax yield, real yield, risk-adjusted)
+    etf_list = [_enrich_derived(d, tax_rate) for d in etf_list]
     period_field = {
         "1yr": "total_return_1yr",
         "3yr": "total_return_3yr",

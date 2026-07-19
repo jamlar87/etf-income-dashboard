@@ -128,6 +128,9 @@
                 </label>
                 <label>Sort by:
                     <select id="sort-by">
+                        <option value="risk_adjusted" selected>Risk-Adjusted Income</option>
+                        <option value="real_yield">Real Yield (Yield + NAV)</option>
+                        <option value="after_tax_yield">After-Tax Yield</option>
                         <option value="current_yield">Current Yield</option>
                         <option value="avg_yield_since_inception">Avg Yield (Inception)</option>
                         <option value="distribution_coverage">Distribution Coverage</option>
@@ -153,6 +156,9 @@
                 <label>
                     <input type="checkbox" id="sort-desc" checked> Descending
                 </label>
+                <label>Tax Rate:
+                    <input type="number" id="tax-rate" value="20" min="0" max="50" step="1" style="width:48px;padding:2px">%
+                </label>
             </div>
             <div class="table-wrap">
                 <table id="etf-table">
@@ -164,6 +170,9 @@
                             <th data-sort="inception_date">Inception</th>
                             <th data-sort="current_yield">Yield
                                 <span class="info-tip" data-tip="Current 12-month trailing distribution yield. Calculated as total dividends over trailing 12 months ÷ current price.">ⓘ</span>
+                            </th>
+                            <th data-sort="after_tax_yield">After-Tax Yld
+                                <span class="info-tip" data-tip="Yield after a flat ordinary-income tax rate (default 20%, adjustable). Rough estimate — ignores ROC/qualified-dividend nuance. Set your rate in the Tax Rate box.">ⓘ</span>
                             </th>
                             <th data-sort="avg_yield_since_inception">Avg Yield
                                 <span class="info-tip" data-tip="Average yield since the ETF's inception. Large gap from current yield may indicate a dividend trap.">ⓘ</span>
@@ -209,6 +218,9 @@
                             </th>
                             <th data-sort="nav_annual_change">NAV Chg
                                 <span class="info-tip" data-tip="Annualized NAV change (price only, excludes dividends). Negative = the fund's assets are shrinking.">ⓘ</span>
+                            </th>
+                            <th data-sort="real_yield">Real Yld
+                                <span class="info-tip" data-tip="Total return to the holder = Yield + NAV Change. This is what you actually kept. Negative means NAV erosion ate your distribution — you lost money despite the yield.">ⓘ</span>
                             </th>
                             <th data-sort="beta_sp500">Beta
                                 <span class="info-tip" data-tip="Beta vs S&P 500. Measures magnitude of price movement relative to the market. Above 1 = more volatile than the market.">ⓘ</span>
@@ -466,6 +478,6 @@
 
 </main>
 
-<script src="/static/js/app.v48.js" defer></script>
+<script src="/static/js/app.v49.js" defer></script>
 </body>
 </html>
