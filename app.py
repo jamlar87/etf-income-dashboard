@@ -615,6 +615,8 @@ def leaderboard(
         "3yr": "total_return_3yr",
         "5yr": "total_return_5yr",
         "10yr": "total_return_10yr",
+        "15yr": "total_return_5yr",
+        "20yr": "total_return_5yr",
         "max": "total_return_10yr",
     }.get(period, "total_return_1yr")
 
@@ -625,6 +627,8 @@ def leaderboard(
         "best_total_return_3yr": [],
         "best_total_return_5yr": [],
         "best_total_return_10yr": [],
+        "best_total_return_15yr": [],
+        "best_total_return_20yr": [],
         "best_sharpe": [],
         "best_sortino": [],
         "best_calmar": [],
@@ -689,7 +693,7 @@ def leaderboard(
     else:
         # Compute Sharpe from price history for 3yr/5yr/10yr
         conn2 = get_db()
-        months_map = {"3yr": 36, "5yr": 60, "10yr": 120}
+        months_map = {"3yr": 36, "5yr": 60, "10yr": 120, "15yr": 180, "20yr": 240}
         n_months = months_map.get(period, 36)
         # Get SPY and all ETF prices
         tickers_all = [e["ticker"] for e in etf_list]
@@ -909,7 +913,7 @@ def price_growth(period: str = Query("1yr"), mode: str = Query("high_income")):
 
     # Determine start date based on period
     now = datetime.now()
-    period_days = {"1yr": 400, "3yr": 1100, "5yr": 1825, "10yr": 3650, "max": 99999}
+    period_days = {"1yr": 400, "3yr": 1100, "5yr": 1825, "10yr": 3650, "15yr": 5475, "20yr": 7300, "max": 99999}
     days = period_days.get(period, 400)
     cutoff = now - timedelta(days=days)
     cutoff_str = cutoff.strftime("%Y-%m-%d")
@@ -1105,7 +1109,7 @@ def simulate_portfolio(data: dict):
 
     # Apply period filter
     period = data.get("period", "max")
-    if period != "max" and period in ("1yr", "3yr", "5yr", "10yr"):
+    if period != "max" and period in ("1yr", "3yr", "5yr", "10yr", "15yr", "20yr"):
         years = int(period.replace("yr", ""))
         cutoff_date = (datetime.strptime(months[-1], "%Y-%m-%d") - timedelta(days=years * 365 + 1)).strftime("%Y-%m-%d")
         months = [m for m in months if m >= cutoff_date]
@@ -1440,6 +1444,10 @@ def best_portfolios(
         lookback_months = 60
     elif period == "10yr":
         lookback_months = 120
+    elif period == "15yr":
+        lookback_months = 180
+    elif period == "20yr":
+        lookback_months = 240
     else:
         lookback_months = 12
 
