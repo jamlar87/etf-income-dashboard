@@ -1828,6 +1828,212 @@ def basket(tickers: str = Query(""), tax_rate: float = Query(0.20)):
     return {"tickers": symbol_list, "blended": blended, "holdings": holdings}
 
 
+@app.get("/api/basket/simulate-window")
+def basket_simulate_window(
+    tickers: str = Query("", description="Comma-separated tickers to simulate"),
+    window_months: int = Query(12, ge=6, le=240),
+    iterations: int = Query(2000, ge=100, le=10000),
+    tax_rate: float = Query(0.20),
+    taxable: bool = Query(True),
+):
+    """
+    Rolling-window Monte Carlo for a user-provided basket of ETFs.
+    Returns distribution statistics for the portfolio's annualized income,
+    total return, and NAV change over the given lookback window.
+    """
+    import random
+    import statistics
+
+    conn = get_db()
+    symbol_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not symbol_list:
+        conn.close()
+        return {"error": "No tickers provided", "stats": None}
+
+    # Load price data for the given tickers
+    price_data = _get_monthly_prices(conn, symbol_list)
+    conn.close()
+
+    # Filter to only those with sufficient history
+    valid = {t: p for t, p in price_data.items() if len(p) >= window_months}
+    if len(valid) < 1:
+        return {"error": f"Insufficient history for tickers (need {window_months} months)", "stats": None}
+
+    # Use equal-weight basket
+    n = len(valid)
+    weights = [1.0 / n] * n
+    tickers_valid = list(valid.keys())
+
+    # Run simulations
+    annualized_incomes = []
+    total_returns = []
+    nav_changes = []
+
+    def run_simulation_batch(batch_start_idx, batch_size):
+        """Run a batch of simulation iterations."""
+        batch_incomes = []
+        batch_returns = []
+        batch_navs = []
+
+        for _ in range(batch_size):
+            # Bootstrap resample monthly periods (with replacement)
+            months = min(window_months, min(len(v) for v in valid.values()))
+            # Pick a random contiguous window
+            start_idx = random.randint(0, max(0, min(len(v) for v in valid.values()) - months))
+
+            portfolio_returns = []
+            portfolio_divs = []
+
+            for t in tickers_valid:
+                prices = valid[t]
+                w = weights[tickers_valid.index(t)]
+                # Get the window
+                window_prices = prices[start_idx:start_idx + months]
+                if len(window_prices) < months:
+                    continue
+
+                # Calculate monthly returns and dividends
+                for i in range(1, len(window_prices)):
+                    ret = (window_prices[i]["close"] - window_prices[i-1]["close"]) / window_prices[i-1]["close"]
+                    div = window_prices[i]["dividend"] or 0
+                    div_yield = div / window_prices[i-1]["close"] if window_prices[i-1]["close"] > 0 else 0
+                    portfolio_returns.append(ret * w)
+                    portfolio_divs.append(div_yield * w)
+
+            if portfolio_returns:
+                total_ret = sum(portfolio_returns) + sum(portfolio_divs)
+                batch_returns.append(total_ret)
+                batch_navs.append(sum(portfolio_returns))
+                batch_incomes.append(sum(portfolio_divs) * 12)  # annualize monthly div yield
+
+        return batch_incomes, batch_returns, batch_navs
+
+    # Use parallel processing for iterations > 500
+    if iterations > 500:
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            import concurrent.futures
+
+            # Split iterations into batches
+            batch_size = 100
+            num_batches = (iterations + batch_size - 1) // batch_size
+
+            with ThreadPoolExecutor(max_workers=min(4, num_batches)) as executor:
+                futures = []
+                for i in range(num_batches):
+                    current_batch_size = min(batch_size, iterations - i * batch_size)
+                    future = executor.submit(run_simulation_batch, i, current_batch_size)
+                    futures.append(future)
+
+                # Collect results
+                for future in concurrent.futures.as_completed(futures):
+                    batch_incomes, batch_returns, batch_navs = future.result()
+                    annualized_incomes.extend(batch_incomes)
+                    total_returns.extend(batch_returns)
+                    nav_changes.extend(batch_navs)
+        except ImportError:
+            # Fall back to sequential processing if threading not available
+            for _ in range(iterations):
+                # Bootstrap resample monthly periods (with replacement)
+                months = min(window_months, min(len(v) for v in valid.values()))
+                # Pick a random contiguous window
+                start_idx = random.randint(0, max(0, min(len(v) for v in valid.values()) - months))
+
+                portfolio_returns = []
+                portfolio_divs = []
+
+                for t in tickers_valid:
+                    prices = valid[t]
+                    w = weights[tickers_valid.index(t)]
+                    # Get the window
+                    window_prices = prices[start_idx:start_idx + months]
+                    if len(window_prices) < months:
+                        continue
+
+                    # Calculate monthly returns and dividends
+                    for i in range(1, len(window_prices)):
+                        ret = (window_prices[i]["close"] - window_prices[i-1]["close"]) / window_prices[i-1]["close"]
+                        div = window_prices[i]["dividend"] or 0
+                        div_yield = div / window_prices[i-1]["close"] if window_prices[i-1]["close"] > 0 else 0
+                        portfolio_returns.append(ret * w)
+                        portfolio_divs.append(div_yield * w)
+
+                if portfolio_returns:
+                    total_ret = sum(portfolio_returns) + sum(portfolio_divs)
+                    total_returns.append(total_ret)
+                    nav_changes.append(sum(portfolio_returns))
+                    annualized_incomes.append(sum(portfolio_divs) * 12)  # annualize monthly div yield
+    else:
+        # Sequential processing for small iteration counts
+        for _ in range(iterations):
+            # Bootstrap resample monthly periods (with replacement)
+            months = min(window_months, min(len(v) for v in valid.values()))
+            # Pick a random contiguous window
+            start_idx = random.randint(0, max(0, min(len(v) for v in valid.values()) - months))
+
+            portfolio_returns = []
+            portfolio_divs = []
+
+            for t in tickers_valid:
+                prices = valid[t]
+                w = weights[tickers_valid.index(t)]
+                # Get the window
+                window_prices = prices[start_idx:start_idx + months]
+                if len(window_prices) < months:
+                    continue
+
+                # Calculate monthly returns and dividends
+                for i in range(1, len(window_prices)):
+                    ret = (window_prices[i]["close"] - window_prices[i-1]["close"]) / window_prices[i-1]["close"]
+                    div = window_prices[i]["dividend"] or 0
+                    div_yield = div / window_prices[i-1]["close"] if window_prices[i-1]["close"] > 0 else 0
+                    portfolio_returns.append(ret * w)
+                    portfolio_divs.append(div_yield * w)
+
+            if portfolio_returns:
+                total_ret = sum(portfolio_returns) + sum(portfolio_divs)
+                total_returns.append(total_ret)
+                nav_changes.append(sum(portfolio_returns))
+                annualized_incomes.append(sum(portfolio_divs) * 12)  # annualize monthly div yield
+
+    if not annualized_incomes:
+        return {"error": "No valid simulation runs", "stats": None}
+
+    def pctile(data, p):
+        return round(statistics.quantiles(data, n=100)[p-1], 2) if len(data) > 1 else round(data[0], 2)
+
+    stats = {
+        "annualized_income": {
+            "mean": round(statistics.mean(annualized_incomes), 2),
+            "median": round(statistics.median(annualized_incomes), 2),
+            "p5": pctile(annualized_incomes, 5),
+            "p25": pctile(annualized_incomes, 25),
+            "p75": pctile(annualized_incomes, 75),
+            "p95": pctile(annualized_incomes, 95),
+        },
+        "total_return": {
+            "mean": round(statistics.mean(total_returns) * 100, 2),
+            "median": round(statistics.median(total_returns) * 100, 2),
+            "p5": pctile([x*100 for x in total_returns], 5),
+            "p25": pctile([x*100 for x in total_returns], 25),
+            "p75": pctile([x*100 for x in total_returns], 75),
+            "p95": pctile([x*100 for x in total_returns], 95),
+        },
+        "nav_change": {
+            "mean": round(statistics.mean(nav_changes) * 100, 2),
+            "median": round(statistics.median(nav_changes) * 100, 2),
+            "p5": pctile([x*100 for x in nav_changes], 5),
+            "p25": pctile([x*100 for x in nav_changes], 25),
+            "p75": pctile([x*100 for x in nav_changes], 75),
+            "p95": pctile([x*100 for x in nav_changes], 95),
+        },
+        "tickers": tickers_valid,
+        "iterations": iterations,
+        "window_months": window_months,
+    }
+    return stats
+
+
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 # Add docs mount to serve simulation guide
