@@ -1669,6 +1669,350 @@ def get_tax_scores():
     return [dict(r) for r in rows]
 
 
+@app.get("/buy-the-dip")
+def buy_the_dip_page():
+    tmpl = _env.get_template("dip-screener.html")
+    return HTMLResponse(tmpl.render({"request": {}}))
+
+
+# Cache for the dip screener results — computed once, reused for 4 hours
+_dip_cache = {"data": None, "ts": 0}
+_DIP_CACHE_TTL = 14400  # 4 hours
+
+
+@app.get("/api/dip-screener")
+def dip_screener(
+    min_dip_score: float = Query(0, ge=0, le=100),
+    trend_filter: str = Query("any", regex="^(any|uptrend|neutral)$"),
+    min_nav_change: float = Query(-100, ge=-100, le=100),
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    force_refresh: bool = Query(False),
+):
+    """Buy the Dip Screener — computes technical indicators and a composite
+    dip score (0–100) from monthly price_history data using pandas_ta.
+
+    Five signal components:
+      1. RSI(14) oversold           — 25 pts
+      2. % off 52-week high          — 25 pts
+      3. Bollinger Band %B position  — 20 pts
+      4. 52-week range percentile    — 15 pts
+      5. Trend health (200d SMA)     — 15 pts (modifier)
+
+    Results are cached in memory for 4 hours (TTL). First call is slow (~30-60s),
+    subsequent calls are instant.
+    """
+    import time as _time
+
+    now = _time.time()
+    if not force_refresh and _dip_cache["data"] is not None and (now - _dip_cache["ts"]) < _DIP_CACHE_TTL:
+        all_results = _dip_cache["data"]
+    else:
+        all_results = _compute_dip_signals()
+        _dip_cache["data"] = all_results
+        _dip_cache["ts"] = now
+
+    # Apply filters
+    if min_nav_change > -100:
+        all_results = [r for r in all_results if r.get("nav_annual_change") is None or r["nav_annual_change"] >= min_nav_change]
+    if trend_filter == "uptrend":
+        all_results = [r for r in all_results if r["trend_label"] == "Uptrend"]
+    elif trend_filter == "neutral":
+        all_results = [r for r in all_results if r["trend_label"] != "Downtrend"]
+
+    if min_dip_score > 0:
+        all_results = [r for r in all_results if r["dip_score"] >= min_dip_score]
+
+    total = len(all_results)
+    paginated = all_results[offset:offset + limit]
+
+    return {
+        "total": total,
+        "filtered": total,
+        "returned": len(paginated),
+        "offset": offset,
+        "limit": limit,
+        "results": paginated,
+    }
+
+
+def _compute_hist_drawdowns(prices):
+    """Walk through closing prices and return a list of all distinct
+    peak-to-trough drawdown depths (positive percentages). Each drawdown
+    starts when price drops from a peak and ends when a new peak is made."""
+    if not prices or len(prices) < 3:
+        return []
+
+    peak = prices[0]
+    trough = peak
+    in_dd = False
+    drawdowns = []
+
+    for p in prices[1:]:
+        if p > peak:
+            if in_dd and trough < peak:
+                depth = (peak - trough) / peak * 100
+                drawdowns.append(round(depth, 1))
+                in_dd = False
+            peak = p
+            trough = peak
+        elif p < peak:
+            in_dd = True
+            if p < trough:
+                trough = p
+
+    # Final drawdown if still in one
+    if in_dd and trough < peak:
+        depth = (peak - trough) / peak * 100
+        drawdowns.append(round(depth, 1))
+
+    return drawdowns
+
+
+def _compute_dip_signals():
+    """Heavy computation: loads all price_history data and computes dip signals
+    for every active ETF in the universe. Returns list of result dicts sorted
+    by dip_score descending.
+    """
+    import pandas as pd
+    import pandas_ta as ta
+
+    conn = get_db()
+
+    # Pull all active ETF_universe tickers (quality-filter ready)
+    uni_rows = conn.execute("""
+        SELECT u.ticker, COALESCE(e.name, u.name) AS name, u.asset_class, u.aum,
+               COALESCE(e.provider, u.provider) AS provider,
+               COALESCE(e.current_yield, u.current_yield) AS current_yield,
+               COALESCE(e.expense_ratio, u.expense_ratio) AS expense_ratio,
+               COALESCE(e.sharpe_ratio, u.sharpe_ratio) AS sharpe_ratio,
+               COALESCE(e.total_return_1yr, u.total_return_1yr) AS total_return_1yr,
+               COALESCE(e.nav_annual_change, u.nav_annual_change) AS nav_annual_change,
+               u.is_leveraged, u.is_active,
+               COALESCE(e.tax_treatment_score, u.tax_treatment_score) AS tax_treatment_score
+        FROM etf_universe u
+        LEFT JOIN etfs e ON u.ticker = e.ticker
+        WHERE u.is_active = 1
+          AND (u.is_leveraged IS NULL OR u.is_leveraged = 0)
+          AND (u.aum IS NOT NULL AND u.aum >= 2000)
+        ORDER BY u.ticker
+    """).fetchall()
+
+    tickers = [r["ticker"] for r in uni_rows]
+    info_map = {r["ticker"]: dict(r) for r in uni_rows}
+
+    if not tickers:
+        conn.close()
+        return []
+
+    # Fetch all price history in one batch
+    placeholders = ",".join("?" * len(tickers))
+    ph_rows = conn.execute(
+        f"SELECT ticker, date, close, dividend FROM price_history "
+        f"WHERE ticker IN ({placeholders}) ORDER BY ticker, date",
+        tickers
+    ).fetchall()
+    conn.close()
+
+    # Group prices by ticker
+    price_groups = {}
+    for r in ph_rows:
+        t = r["ticker"]
+        if t not in price_groups:
+            price_groups[t] = []
+        price_groups[t].append({"date": r["date"], "close": float(r["close"]),
+                                "dividend": float(r["dividend"])})
+
+    results = []
+
+    for ticker in tickers:
+        hist = price_groups.get(ticker, [])
+        if len(hist) < 14:  # need at least 14 months for RSI
+            continue
+
+        info = info_map.get(ticker, {})
+        closes = [h["close"] for h in hist]
+        dates = [h["date"] for h in hist]
+        latest_close = closes[-1]
+        latest_date = dates[-1]
+
+        # Build a DataFrame for pandas_ta
+        df = pd.DataFrame({"close": closes})
+
+        # 1. RSI(14)
+        rsi_series = ta.rsi(df["close"], length=14)
+        latest_rsi = rsi_series.iloc[-1] if rsi_series is not None and not rsi_series.isna().iloc[-1] else None
+        rsi_rising = False
+        if rsi_series is not None and len(rsi_series.dropna()) >= 2:
+            last_two = rsi_series.dropna().iloc[-2:]
+            if len(last_two) == 2 and last_two.iloc[1] > last_two.iloc[0]:
+                rsi_rising = True
+
+        # 2. 52-week high/low (12-month window)
+        lookback_52w = min(12, len(closes))
+        recent = closes[-lookback_52w:]
+        wk52_high = max(recent) if recent else latest_close
+        wk52_low = min(recent) if recent else latest_close
+        pct_off_high = round(((latest_close - wk52_high) / wk52_high) * 100, 2) if wk52_high > 0 else 0
+        range_pct = round(((latest_close - wk52_low) / (wk52_high - wk52_low)) * 100, 2) if (wk52_high - wk52_low) > 0 else 0
+        abs_pct = abs(pct_off_high)
+
+        # 3. Bollinger Bands (20, 2.0)
+        bb_df = ta.bbands(df["close"], length=min(20, len(closes)), std=2.0)
+        bb_lower = bb_upper = bb_mid = None
+        if bb_df is not None:
+            bb_cols = list(bb_df.columns)
+            lower_col = [c for c in bb_cols if "BBL" in c]
+            upper_col = [c for c in bb_cols if "BBU" in c]
+            mid_col = [c for c in bb_cols if "BBM" in c]
+            bb_lower = float(bb_df[lower_col[0]].iloc[-1]) if lower_col else None
+            bb_upper = float(bb_df[upper_col[0]].iloc[-1]) if upper_col else None
+            bb_mid = float(bb_df[mid_col[0]].iloc[-1]) if mid_col else None
+
+        bbp = None
+        if bb_lower is not None and bb_upper is not None and bb_upper != bb_lower:
+            bbp = round((latest_close - bb_lower) / (bb_upper - bb_lower), 2)
+
+        # 5. Historical pullback analysis — identify every peak-to-trough drawdown
+        #    and rank the current dip against the ticker's own history.
+        hist_drawdowns = _compute_hist_drawdowns(closes)
+        hist_dd_count = len(hist_drawdowns)
+        hist_avg_dd = round(sum(hist_drawdowns) / hist_dd_count, 1) if hist_dd_count else None
+        hist_max_dd = round(max(hist_drawdowns), 1) if hist_drawdowns else None
+
+        current_dd_pctile = None
+        if hist_drawdowns and abs_pct > 0:
+            # What % of historical drawdowns is shallower than the current one?
+            shallower = sum(1 for d in hist_drawdowns if d < abs_pct)
+            current_dd_pctile = round(shallower / len(hist_drawdowns) * 100)
+
+        # 6. SMAs
+        sma_200 = ta.sma(df["close"], length=min(12, len(closes)))
+        sma200_val = float(sma_200.iloc[-1]) if sma_200 is not None and not pd.isna(sma_200.iloc[-1]) else None
+        sma_50 = ta.sma(df["close"], length=min(6, len(closes)))
+        sma50_val = float(sma_50.iloc[-1]) if sma_50 is not None and not pd.isna(sma_50.iloc[-1]) else None
+
+        # --- Score computation ---
+        rsi_score = 0
+        if latest_rsi is not None:
+            if latest_rsi < 20: rsi_score = 25
+            elif latest_rsi < 25: rsi_score = 22
+            elif latest_rsi < 30: rsi_score = 20
+            elif latest_rsi < 35: rsi_score = 16
+            elif latest_rsi < 40: rsi_score = 12
+            elif latest_rsi < 45: rsi_score = 6
+            if latest_rsi < 40 and rsi_rising:
+                rsi_score = min(25, rsi_score + 5)
+
+        pullback_score = 0
+        if abs_pct >= 20: pullback_score = 25
+        elif abs_pct >= 15: pullback_score = 22
+        elif abs_pct >= 12: pullback_score = 19
+        elif abs_pct >= 10: pullback_score = 16
+        elif abs_pct >= 7: pullback_score = 12
+        elif abs_pct >= 5: pullback_score = 8
+        elif abs_pct >= 3: pullback_score = 4
+
+        # Historical bonus (up to +5): current dip deeper than 75% of past dips
+        hist_bonus = 0
+        if current_dd_pctile is not None and hist_dd_count >= 3:
+            if current_dd_pctile >= 90:
+                hist_bonus = 5
+            elif current_dd_pctile >= 75:
+                hist_bonus = 3
+
+        bb_score = 0
+        if bb_lower is not None and latest_close <= bb_lower:
+            bb_score = 20
+        elif bbp is not None and bbp <= 0.2: bb_score = 16
+        elif bbp is not None and bbp <= 0.4: bb_score = 12
+        elif bbp is not None and bbp <= 0.6: bb_score = 6
+
+        range_score = 0
+        if range_pct is not None:
+            if range_pct <= 10: range_score = 15
+            elif range_pct <= 20: range_score = 12
+            elif range_pct <= 35: range_score = 7
+            elif range_pct <= 50: range_score = 3
+
+        trend_score = 0
+        if sma200_val is not None and sma200_val > 0:
+            if latest_close >= sma200_val:
+                trend_score = 15
+            elif latest_close >= sma200_val * 0.98:
+                trend_score = 10
+            elif latest_close >= sma200_val * 0.95:
+                trend_score = 5
+
+        dip_score = rsi_score + pullback_score + hist_bonus + bb_score + range_score + trend_score
+
+        # Trend classification
+        if sma200_val and latest_close >= sma200_val:
+            trend_label = "Uptrend"
+        elif sma200_val and latest_close >= sma200_val * 0.95:
+            trend_label = "Neutral"
+        else:
+            trend_label = "Downtrend"
+
+        if dip_score >= 70: tier = "strong"
+        elif dip_score >= 50: tier = "moderate"
+        elif dip_score >= 30: tier = "watch"
+        else: tier = "neutral"
+
+        # Signal breakdown
+        signals = []
+        if rsi_score >= 16: signals.append("RSI Oversold")
+        if pullback_score >= 16: signals.append("Deep Pullback")
+        elif pullback_score >= 8: signals.append("Moderate Pullback")
+        if bb_score >= 16: signals.append("Below BB")
+        if range_score >= 12: signals.append("52W Bottom")
+        if trend_score >= 15: signals.append("Uptrend Dip")
+        if hist_bonus >= 3: signals.append("Rare Dip")
+
+        results.append({
+            "ticker": ticker,
+            "name": info.get("name", ""),
+            "provider": info.get("provider", ""),
+            "asset_class": info.get("asset_class", ""),
+            "aum": info.get("aum"),
+            "current_yield": info.get("current_yield"),
+            "expense_ratio": info.get("expense_ratio"),
+            "sharpe_ratio": info.get("sharpe_ratio"),
+            "total_return_1yr": info.get("total_return_1yr"),
+            "nav_annual_change": info.get("nav_annual_change"),
+            "latest_price": round(latest_close, 2),
+            "latest_date": latest_date,
+            "dip_score": dip_score,
+            "tier": tier,
+            "signals": signals,
+            "signal_count": len(signals),
+            "rsi_14": round(latest_rsi, 1) if latest_rsi is not None else None,
+            "rsi_score": rsi_score,
+            "pct_off_52w_high": pct_off_high,
+            "pullback_score": pullback_score,
+            "bb_percent_b": bbp,
+            "bb_score": bb_score,
+            "bb_lower": round(bb_lower, 2) if bb_lower else None,
+            "bb_upper": round(bb_upper, 2) if bb_upper else None,
+            "range_percentile": range_pct,
+            "range_score": range_score,
+            "trend_label": trend_label,
+            "trend_score": trend_score,
+            "sma_200": round(sma200_val, 2) if sma200_val else None,
+            "sma_50": round(sma50_val, 2) if sma50_val else None,
+            "pct_vs_sma200": round(((latest_close - sma200_val) / sma200_val) * 100, 2) if sma200_val and sma200_val > 0 else None,
+            "rsi_rising": rsi_rising,
+            "hist_dd_count": hist_dd_count,
+            "hist_avg_dd": hist_avg_dd,
+            "hist_max_dd": hist_max_dd,
+            "current_dd_pctile": current_dd_pctile,
+            "hist_bonus": hist_bonus,
+        })
+
+    results.sort(key=lambda x: -x["dip_score"])
+    return results
+
+
 @app.get("/tax-admin")
 def tax_admin_page():
     tmpl = _env.get_template("tax-admin.html")

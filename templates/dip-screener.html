@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ETF Dip Screener — Buy the Dip</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<link rel="stylesheet" href="/static/css/style.v8.css">
+<style>
+/* Dip Screener Specific Styles */
+:root {
+    --dip-strong: #34a853;
+    --dip-moderate: #f0a030;
+    --dip-watch: #4fc3f7;
+    --dip-neutral: #555;
+    --dip-bg-dark: #0d1117;
+}
+
+body { background: var(--dip-bg-dark); }
+
+.dip-header {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+}
+.dip-header h1 {
+    font-size: 1.6em; margin: 0;
+    background: linear-gradient(135deg, #34a853, #4fc3f7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.dip-header .subtitle { margin: 4px 0 0 0; font-size: 0.85em; color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); }
+
+.dip-controls {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px;
+}
+.dip-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.82em; color: var(--text-dim); }
+.dip-controls select, .dip-controls input[type="number"] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 4px 8px; border-radius: 4px; font-size: 0.85em;
+}
+.dip-controls select:focus, .dip-controls input:focus { outline: none; border-color: var(--accent); }
+
+.dip-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+    margin-bottom: 18px;
+}
+.dip-stat-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px;
+    text-align: center;
+}
+.dip-stat-card .stat-num { font-size: 1.5em; font-weight: 700; }
+.dip-stat-card .stat-desc { font-size: 0.75em; color: var(--text-dim); margin-top: 2px; }
+.dip-stat-card.strong .stat-num { color: var(--dip-strong); }
+.dip-stat-card.moderate .stat-num { color: var(--dip-moderate); }
+.dip-stat-card.watch .stat-num { color: var(--dip-watch); }
+
+/* Tier badges */
+.tier-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 0.72em; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.tier-badge.strong { background: rgba(52,168,83,0.15); color: var(--dip-strong); border: 1px solid rgba(52,168,83,0.3); }
+.tier-badge.moderate { background: rgba(240,160,48,0.15); color: var(--dip-moderate); border: 1px solid rgba(240,160,48,0.3); }
+.tier-badge.watch { background: rgba(79,195,247,0.15); color: var(--dip-watch); border: 1px solid rgba(79,195,247,0.3); }
+.tier-badge.neutral { background: rgba(85,85,85,0.15); color: #888; border: 1px solid rgba(85,85,85,0.3); }
+
+/* Signal tags */
+.signal-tag {
+    display: inline-block; padding: 1px 6px; margin: 0 2px 2px 0;
+    border-radius: 3px; font-size: 0.68em; font-weight: 600;
+}
+.signal-tag.rsi { background: rgba(52,168,83,0.15); color: var(--dip-strong); border: 1px solid rgba(52,168,83,0.2); }
+.signal-tag.pullback { background: rgba(240,160,48,0.15); color: var(--dip-moderate); border: 1px solid rgba(240,160,48,0.2); }
+.signal-tag.bb { background: rgba(79,195,247,0.15); color: var(--dip-watch); border: 1px solid rgba(79,195,247,0.2); }
+.signal-tag.range { background: rgba(155,89,182,0.15); color: #9b59b6; border: 1px solid rgba(155,89,182,0.2); }
+.signal-tag.trend { background: rgba(52,152,219,0.15); color: #3498db; border: 1px solid rgba(52,152,219,0.2); }
+
+/* Score bar */
+.score-bar {
+    display: inline-block; height: 6px; border-radius: 3px;
+    margin-right: 6px; vertical-align: middle;
+}
+.score-bar.strong { background: var(--dip-strong); }
+.score-bar.moderate { background: var(--dip-moderate); }
+.score-bar.watch { background: var(--dip-watch); }
+.score-bar.neutral { background: var(--dip-neutral); }
+
+/* Trend badge */
+.trend-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 0.72em; font-weight: 600;
+}
+.trend-badge.uptrend { background: rgba(52,168,83,0.12); color: var(--dip-strong); }
+.trend-badge.neutral { background: rgba(240,160,48,0.12); color: var(--dip-moderate); }
+.trend-badge.downtrend { background: rgba(231,76,92,0.12); color: var(--red); }
+
+/* Table enhancements */
+#dip-table { font-size: 0.74em; }
+#dip-table th { white-space: nowrap; padding: 6px 5px; }
+#dip-table td { padding: 5px; vertical-align: middle; }
+#dip-table .ticker-col { font-weight: 700; color: var(--accent); cursor: pointer; }
+#dip-table .ticker-col:hover { text-decoration: underline; }
+
+/* Dip score column */
+.score-col { font-weight: 700; text-align: center; }
+.score-col.s-strong { color: var(--dip-strong); }
+.score-col.s-moderate { color: var(--dip-moderate); }
+.score-col.s-watch { color: var(--dip-watch); }
+.score-col.s-neutral { color: #666; }
+
+/* Value colors */
+.val-neg { color: var(--red); }
+.val-pos { color: var(--green); }
+.val-neutral { color: var(--text-dim); }
+
+/* Detail row (expandable) */
+.detail-row { display: none; }
+.detail-row.show { display: table-row; }
+.detail-cell {
+    padding: 12px 16px !important;
+    background: rgba(79,195,247,0.03);
+    border-bottom: 1px solid var(--border);
+}
+.detail-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; font-size: 0.82em;
+}
+.detail-item { text-align: center; }
+.detail-item .lbl { font-size: 0.72em; color: var(--text-dim); }
+.detail-item .val { font-weight: 600; font-size: 0.9em; }
+.detail-item .val.positive { color: var(--green); }
+.detail-item .val.negative { color: var(--red); }
+
+/* Back to dashboard button */
+.back-link {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--text-dim); text-decoration: none;
+    font-size: 0.85em; margin-bottom: 10px;
+}
+.back-link:hover { color: var(--accent); }
+
+/* Explanation tooltip */
+.signal-explain { position: relative; cursor: help; }
+</style>
+</head>
+<body>
+
+<main class="content" style="margin-left:0;max-width:100%;padding:24px 30px">
+
+<a href="/" class="back-link">← Back to ETF Dashboard</a>
+
+<div class="dip-header">
+    <div>
+        <h1>📉 Buy the Dip — ETF Screener</h1>
+        <p class="subtitle">Multi-signal dip detection: RSI(14) oversold + Bollinger Bands + 52-week range + trend filter</p>
+    </div>
+    <div id="dip-last-updated" style="font-size:0.78em;color:var(--text-dim)"></div>
+</div>
+
+<div class="dip-controls">
+    <label>Min Dip Score:
+        <input type="range" id="dip-min-score" min="0" max="100" value="30" style="width:120px">
+        <span id="dip-min-score-val">30</span>
+    </label>
+    <label>Trend Filter:
+        <select id="dip-trend-filter">
+            <option value="any">Any Trend</option>
+            <option value="uptrend">Uptrend Only</option>
+            <option value="neutral">Uptrend + Neutral</option>
+        </select>
+    </label>
+    <label>Tier:
+        <select id="dip-tier-filter">
+            <option value="all">All Tiers</option>
+            <option value="strong">Strong Only (≥70)</option>
+            <option value="moderate">Moderate+ (≥50)</option>
+            <option value="watch">Watch+ (≥30)</option>
+        </select>
+    </label>
+    <label>Min Yield:
+        <select id="dip-min-yield">
+            <option value="0">Any Yield</option>
+            <option value="1">≥1%</option>
+            <option value="3">≥3%</option>
+            <option value="5">≥5%</option>
+            <option value="8">≥8%</option>
+            <option value="10">≥10%</option>
+        </select>
+    </label>
+    <label>Min NAV Chg:
+        <select id="dip-min-nav" title="Exclude tickers with continual price erosion">
+            <option value="-100">Any NAV change</option>
+            <option value="-10">≥ -10%</option>
+            <option value="-5" selected>≥ -5%</option>
+            <option value="-2">≥ -2%</option>
+            <option value="0">Positive only</option>
+        </select>
+    </label>
+    <label>Max Exp Ratio:
+        <select id="dip-max-er">
+            <option value="10">Any ER</option>
+            <option value="1">≤1.00%</option>
+            <option value="0.75">≤0.75%</option>
+            <option value="0.5">≤0.50%</option>
+        </select>
+    </label>
+    <label>Sort by:
+        <select id="dip-sort-by">
+            <option value="dip_score">Dip Score</option>
+            <option value="pct_off_52w_high">% Off High</option>
+            <option value="rsi_14">RSI(14)</option>
+            <option value="current_yield">Yield</option>
+            <option value="total_return_1yr">1Y Return</option>
+            <option value="aum">AUM</option>
+        </select>
+    </label>
+    <button id="dip-refresh" class="btn">⟳ Refresh</button>
+</div>
+
+<div class="dip-stats" id="dip-stats">
+    <div class="dip-stat-card" id="ds-total"><div class="stat-num">--</div><div class="stat-desc">Total Scanned</div></div>
+    <div class="dip-stat-card strong" id="ds-strong"><div class="stat-num">--</div><div class="stat-desc">Strong Dips</div></div>
+    <div class="dip-stat-card moderate" id="ds-moderate"><div class="stat-num">--</div><div class="stat-desc">Moderate Dips</div></div>
+    <div class="dip-stat-card watch" id="ds-watch"><div class="stat-num">--</div><div class="stat-desc">Watch List</div></div>
+</div>
+
+<div class="card">
+    <div class="table-wrap">
+        <table id="dip-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th data-sort="ticker">Ticker</th>
+                    <th data-sort="dip_score">Score ▲</th>
+                    <th data-sort="tier">Tier</th>
+                    <th>Signals</th>
+                    <th data-sort="trend_label">Trend</th>
+                    <th data-sort="nav_annual_change">NAV Chg</th>
+                    <th data-sort="rsi_14">RSI(14)</th>
+                    <th data-sort="pct_off_52w_high">% off 52W H</th>
+                    <th data-sort="bb_percent_b">BB %B</th>
+                    <th data-sort="range_percentile">52W %ile</th>
+                    <th data-sort="current_dd_pctile">vs Hist</th>
+                    <th data-sort="pct_vs_sma200">vs SMA200</th>
+                    <th data-sort="current_yield">Yield</th>
+                    <th data-sort="expense_ratio">Exp</th>
+                    <th data-sort="aum">AUM</th>
+                    <th data-sort="provider">Provider</th>
+                </tr>
+            </thead>
+            <tbody id="dip-tbody"></tbody>
+        </table>
+    </div>
+    <div id="dip-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim)">
+        <p style="font-size:1.2em;margin-bottom:8px">No dip opportunities found</p>
+        <p>Try lowering the minimum score or removing the trend filter.</p>
+    </div>
+</div>
+
+<div class="card" style="margin-top:12px">
+    <h3 style="font-size:0.9em;margin-bottom:8px;color:var(--text-dim)">📖 Understanding the Dip Score</h3>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:0.75em;color:var(--text-dim);line-height:1.5">
+        <div><strong style="color:var(--dip-strong)">RSI(14) — 25 pts</strong><br>Below 30 = oversold. Bonus +5 if RSI rising from oversold.</div>
+        <div><strong style="color:var(--dip-moderate)">% off 52W High — 25 pts</strong><br>>15% off high = deep pullback. >20% = extreme.</div>
+        <div><strong style="color:var(--dip-watch)">Bollinger Band %B — 20 pts</strong><br>Below lower band (0.0) = price extreme. 0.0-0.2 = near lower band.</div>
+        <div><strong style="color:rgb(155,89,182)">52W Range %ile — 15 pts</strong><br>Bottom 10% = in the basement. 10-20% = cheap zone.</div>
+        <div><strong style="color:rgb(52,152,219)">Trend Health — 15 pts</strong><br>Above SMA200 = uptrend intact (ideal dips). Below = falling knife risk.</div>
+    </div>
+</div>
+
+<!-- Ticker Score Lookup -->
+<div class="card" style="margin-top:16px" id="ticker-score-section">
+    <h3 style="font-size:0.95em;margin-bottom:10px;color:var(--text);display:flex;align-items:center;gap:8px">🔍 Ticker Score Lookup
+        <span class="info-tip" data-tip="Look up the full dip score breakdown for any ticker in the scanned universe.">ⓘ</span>
+    </h3>
+    <div style="display:flex;gap:8px;align-items:center;max-width:500px">
+        <input type="text" id="ticker-search-input" placeholder="Enter ticker (e.g. EDV, JEPI, QQQ)..." 
+               style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:0.9em;text-transform:uppercase"
+               maxlength="10">
+        <button id="ticker-search-btn" class="btn">Search</button>
+    </div>
+    <div id="ticker-search-result" style="margin-top:12px"></div>
+</div>
+
+</main>
+
+<script src="/static/js/dip-screener.js?8"></script>
+</body>
+</html>
