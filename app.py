@@ -1508,6 +1508,8 @@ def best_portfolios(
     min_sharpe: float = Query(-10),
     min_div_payments: int = Query(0),
     max_nav_erosion_pct: float = Query(100),
+    sma_period: int = Query(0),
+    sma_direction: str = Query("above"),
 ):
     """Monte Carlo portfolio optimization using real monthly price history."""
     conn = get_db()
@@ -1595,6 +1597,28 @@ def best_portfolios(
         if t in price_data and len(price_data[t]) >= lookback_months:
             recent_tickers.append(t)
 
+    # SMA trend filter (applies AFTER price_data load, BEFORE MC simulation)
+    if sma_period > 0 and recent_tickers:
+        sma_months = max(2, round(sma_period / 20))
+        filtered = []
+        for t in recent_tickers:
+            hist = price_data.get(t, [])
+            if not hist or len(hist) < sma_months + 1:
+                continue
+            # Last sma_months close prices for average, latest close for comparison
+            lookback = hist[-sma_months - 1:]  # extra month for SMA baseline
+            closes = [h["close"] for h in lookback if h["close"] > 0]
+            if len(closes) < sma_months:
+                continue
+            sma = sum(closes[-sma_months:]) / sma_months
+            latest_close = closes[-1]
+            if sma_direction == "above" and latest_close >= sma:
+                filtered.append(t)
+            elif sma_direction == "below" and latest_close <= sma:
+                filtered.append(t)
+        if filtered:
+            recent_tickers = filtered
+
     conn.close()
 
     # Load tax treatment scores from DB (already closed, load from etfs data on next query)
@@ -1617,7 +1641,10 @@ def best_portfolios(
         return {"portfolios": [], "eligible_etfs": len(recent_tickers), "period": period}
 
     # If already cached for this period & mode, reuse
-    cache_key = f"best_portfolios_{lookback_months}_{mode}"
+    if sma_period > 0:
+        cache_key = f"best_portfolios_{lookback_months}_{mode}_sma{sma_period}_{sma_direction}"
+    else:
+        cache_key = f"best_portfolios_{lookback_months}_{mode}"
     if cache_key not in _best_pf_cache:
         # Check disk cache first (cross-session persistence)
         disk_data = _load_cache_from_disk(cache_key)
@@ -1677,7 +1704,7 @@ def buy_the_dip_page():
 
 # Cache for the dip screener results — computed once, reused for 4 hours
 _dip_cache = {"data": None, "ts": 0}
-_DIP_CACHE_TTL = 14400  # 4 hours
+_DIP_CACHE_TTL = 86400  # 24 hours (daily refresh)
 
 
 @app.get("/api/dip-screener")

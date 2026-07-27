@@ -498,12 +498,28 @@
                 </label>
                 <span id="bp-eligible" class="hint"></span>
             </div>
+            <div class="controls" style="margin-top:6px">
+                <label>SMA Filter:
+                    <select id="bp-sma-period">
+                        <option value="0">Off</option>
+                        <option value="20">SMA20</option>
+                        <option value="50" selected>SMA50</option>
+                        <option value="100">SMA100</option>
+                        <option value="200">SMA200</option>
+                    </select>
+                    <select id="bp-sma-direction">
+                        <option value="above">Above</option>
+                        <option value="below">Below</option>
+                    </select>
+                    <span class="info-tip" data-tip="Filter ETFs by SMA trend. Above = only tickers trading above their SMA (uptrend). Below = only tickers below SMA (dip/reversal). SMA computed from monthly close data, trading days approximated.">ⓘ</span>
+                </label>
+            </div>
             <div id="best-portfolios-table"></div>
         </div>
     </section>
 
 </main>
 
-<script src="/static/js/app.v50.js" defer></script>
+<script src="/static/js/app.v51.js" defer></script>
 </body>
 </html>

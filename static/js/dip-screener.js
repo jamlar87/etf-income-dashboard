@@ -64,7 +64,6 @@ function applyFilters() {
     const minYield = parseFloat(document.getElementById('dip-min-yield')?.value) || 0;
     const minNav = parseFloat(document.getElementById('dip-min-nav')?.value) || -100;
     const maxER = parseFloat(document.getElementById('dip-max-er')?.value) || 10;
-    const sortBy = document.getElementById('dip-sort-by')?.value || 'dip_score';
 
     let results = [...allDipResults];
 
@@ -80,14 +79,21 @@ function applyFilters() {
     if (trendFilter === 'uptrend') results = results.filter(r => r.trend_label === 'Uptrend');
     else if (trendFilter === 'neutral') results = results.filter(r => r.trend_label !== 'Downtrend');
 
-    // Sort — respect column click direction if set, else use defaults per field
-    const sortDir = window._dipSortDir;
-    const defaultsAsc = ['rsi_14', 'expense_ratio', 'bb_percent_b', 'range_percentile'];
-    const desc = sortDir ? sortDir === 'desc' : !defaultsAsc.includes(sortBy);
+    // Sort — column clicks use _sortField/_sortDesc, dropdown syncs them
+    const sortBy = window._sortField || 'dip_score';
+    const desc = window._sortDesc !== false;
     results.sort((a, b) => {
-        const va = a[sortBy] ?? (desc ? -Infinity : Infinity);
-        const vb = b[sortBy] ?? (desc ? -Infinity : Infinity);
-        return desc ? vb - va : va - vb;
+        const va = a[sortBy];
+        const vb = b[sortBy];
+        // Nulls always sort to bottom regardless of direction
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        // String fields need localeCompare, numeric fields use subtraction
+        if (typeof va === 'string' || typeof vb === 'string') {
+            return desc ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+        }
+        return desc ? Number(vb) - Number(va) : Number(va) - Number(vb);
     });
 
     filteredResults = results;
@@ -218,24 +224,20 @@ function renderTable(results) {
         th.style.cursor = 'pointer';
         th.onclick = () => {
             const field = th.dataset.sort;
-            const sb = document.getElementById('dip-sort-by');
-            if (!sb) return;
-            // Toggle direction if same field, else default desc
-            if (sb.value === field) {
-                // Flip: currently desc → asc, or asc → desc
-                const isDesc = !th.innerHTML.includes('▼');
-                sb.value = field;
-                // Store direction in sort dir tracked by the render
-                window._dipSortDir = isDesc ? 'desc' : 'asc';
+            if (window._sortField === field) {
+                window._sortDesc = !window._sortDesc;
             } else {
-                sb.value = field;
-                window._dipSortDir = 'desc';
+                window._sortField = field;
+                window._sortDesc = true;
             }
+            // Sync dropdown to match
+            const sb = document.getElementById('dip-sort-by');
+            if (sb) sb.value = field;
             // Update sort arrow indicators
             document.querySelectorAll('#dip-table th[data-sort]').forEach(h => {
                 h.innerHTML = h.innerHTML.replace(/ [▲▼]/, '');
             });
-            th.innerHTML += window._dipSortDir === 'desc' ? ' ▼' : ' ▲';
+            th.innerHTML += window._sortDesc ? ' ▼' : ' ▲';
             applyFilters();
         };
     });
@@ -243,6 +245,9 @@ function renderTable(results) {
 
 // === INIT ===
 document.addEventListener('DOMContentLoaded', () => {
+    // Sort state shared by column clicks and dropdown
+    window._sortField = 'dip_score';
+    window._sortDesc = true;
     loadDipScreener();
 
     // Wire controls
@@ -261,9 +266,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ['dip-trend-filter', 'dip-tier-filter', 'dip-min-yield', 'dip-min-nav', 'dip-max-er', 'dip-sort-by'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.onchange = () => {
-            // Clear column sort indicators when using dropdown
             if (id === 'dip-sort-by') {
-                window._dipSortDir = undefined;
+                window._sortField = el.value;
+                window._sortDesc = true;
+                // Clear column arrow indicators
                 document.querySelectorAll('#dip-table th[data-sort]').forEach(h => {
                     h.innerHTML = h.innerHTML.replace(/ [▲▼]/g, '');
                 });
