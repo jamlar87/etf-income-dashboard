@@ -1,5 +1,5 @@
 // ETF Dip Screener — Buy the Dip Signals
-const DIP_API = '/api/dip-screener';
+const DIP_API = '/income/api/dip-screener';
 let allDipResults = [];
 let filteredResults = [];
 
