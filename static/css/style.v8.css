@@ -505,8 +505,8 @@ td.yield-col { color: var(--success); font-weight: 600; }
     bottom: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--card-bg);
+    color: var(--text);
     padding: 8px 14px;
     border-radius: 6px;
     font-size: 0.78rem;
@@ -519,9 +519,9 @@ td.yield-col { color: var(--success); font-weight: 600; }
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s ease;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    box-shadow: var(--shadow-lg, 0 4px 16px rgba(0,0,0,0.4));
     z-index: 100;
-    border: 1px solid #333;
+    border: 1px solid var(--border);
 }
 .info-tip::before {
     content: '';
@@ -530,7 +530,7 @@ td.yield-col { color: var(--success); font-weight: 600; }
     left: 50%;
     transform: translateX(-50%);
     border: 6px solid transparent;
-    border-top-color: #1a1a2e;
+    border-top-color: transparent;
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s ease;
@@ -557,7 +557,7 @@ th .info-tip::before {
     bottom: auto;
     top: calc(100% + 0px);
     border-top-color: transparent;
-    border-bottom-color: #1a1a2e;
+    border-bottom-color: transparent;
 }
 
 /* Clickable tickers — open Seeking Alpha */
@@ -746,7 +746,7 @@ th .info-tip::before {
     .info-tip, .section-toggle, .btn, #pf-simulate,
     #sidebar-toggle { display: none !important; }
     .content { margin-left: 0; padding: 10px; max-width: 100%; }
-    body { background: #fff; color: #000; }
+    body { background: white; color: black; }
     .card, .stat-card, .lb-section { background: #f5f5f5; border-color: #ddd; }
     .scroll-section { break-inside: avoid; }
 }
