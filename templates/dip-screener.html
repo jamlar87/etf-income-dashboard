@@ -28,14 +28,13 @@
 <style>
 /* Dip Screener Specific Styles */
 :root {
-    --dip-strong: #34a853;
-    --dip-moderate: #f0a030;
-    --dip-watch: #4fc3f7;
+    --dip-strong: var(--success);
+    --dip-moderate: var(--warn);
+    --dip-watch: var(--amber);
     --dip-neutral: #555;
-    --dip-bg-dark: #0d1117;
 }
 
-body { background: var(--dip-bg-dark); }
+body { background: var(--bg); }
 
 .dip-header {
     display: flex; justify-content: space-between; align-items: center;
@@ -43,23 +42,23 @@ body { background: var(--dip-bg-dark); }
 }
 .dip-header h1 {
     font-size: 1.6em; margin: 0;
-    background: linear-gradient(135deg, #34a853, #4fc3f7);
+    background: linear-gradient(135deg, var(--success), var(--amber));
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     background-clip: text;
 }
-.dip-header .subtitle { margin: 4px 0 0 0; font-size: 0.85em; color: var(--text-dim); -webkit-text-fill-color: var(--text-dim); }
+.dip-header .subtitle { margin: 4px 0 0 0; font-size: 0.85em; color: var(--text-muted); -webkit-text-fill-color: var(--text-muted); }
 
 .dip-controls {
     display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
     background: var(--card-bg); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px;
 }
-.dip-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.82em; color: var(--text-dim); }
+.dip-controls label { display: flex; align-items: center; gap: 5px; font-size: 0.82em; color: var(--text-muted); }
 .dip-controls select, .dip-controls input[type="number"] {
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
     padding: 4px 8px; border-radius: 4px; font-size: 0.85em;
 }
-.dip-controls select:focus, .dip-controls input:focus { outline: none; border-color: var(--accent); }
+.dip-controls select:focus, .dip-controls input:focus { outline: none; border-color: var(--amber); }
 
 .dip-stats {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
@@ -71,7 +70,7 @@ body { background: var(--dip-bg-dark); }
     text-align: center;
 }
 .dip-stat-card .stat-num { font-size: 1.5em; font-weight: 700; }
-.dip-stat-card .stat-desc { font-size: 0.75em; color: var(--text-dim); margin-top: 2px; }
+.dip-stat-card .stat-desc { font-size: 0.75em; color: var(--text-muted); margin-top: 2px; }
 .dip-stat-card.strong .stat-num { color: var(--dip-strong); }
 .dip-stat-card.moderate .stat-num { color: var(--dip-moderate); }
 .dip-stat-card.watch .stat-num { color: var(--dip-watch); }
@@ -122,7 +121,7 @@ body { background: var(--dip-bg-dark); }
 #dip-table { font-size: 0.74em; }
 #dip-table th { white-space: nowrap; padding: 6px 5px; }
 #dip-table td { padding: 5px; vertical-align: middle; }
-#dip-table .ticker-col { font-weight: 700; color: var(--accent); cursor: pointer; }
+#dip-table .ticker-col { font-weight: 700; color: var(--amber); cursor: pointer; }
 #dip-table .ticker-col:hover { text-decoration: underline; }
 
 /* Dip score column */
@@ -135,7 +134,7 @@ body { background: var(--dip-bg-dark); }
 /* Value colors */
 .val-neg { color: var(--red); }
 .val-pos { color: var(--green); }
-.val-neutral { color: var(--text-dim); }
+.val-neutral { color: var(--text-muted); }
 
 /* Detail row (expandable) */
 .detail-row { display: none; }
@@ -150,7 +149,7 @@ body { background: var(--dip-bg-dark); }
     gap: 10px; font-size: 0.82em;
 }
 .detail-item { text-align: center; }
-.detail-item .lbl { font-size: 0.72em; color: var(--text-dim); }
+.detail-item .lbl { font-size: 0.72em; color: var(--text-muted); }
 .detail-item .val { font-weight: 600; font-size: 0.9em; }
 .detail-item .val.positive { color: var(--green); }
 .detail-item .val.negative { color: var(--red); }
@@ -158,10 +157,10 @@ body { background: var(--dip-bg-dark); }
 /* Back to dashboard button */
 .back-link {
     display: inline-flex; align-items: center; gap: 4px;
-    color: var(--text-dim); text-decoration: none;
+    color: var(--text-muted); text-decoration: none;
     font-size: 0.85em; margin-bottom: 10px;
 }
-.back-link:hover { color: var(--accent); }
+.back-link:hover { color: var(--amber); }
 
 /* Explanation tooltip */
 .signal-explain { position: relative; cursor: help; }
@@ -178,7 +177,7 @@ body { background: var(--dip-bg-dark); }
         <h1>📉 Buy the Dip — ETF Screener</h1>
         <p class="subtitle">Multi-signal dip detection: RSI(14) oversold + Bollinger Bands + 52-week range + trend filter</p>
     </div>
-    <div id="dip-last-updated" style="font-size:0.78em;color:var(--text-dim)"></div>
+    <div id="dip-last-updated" style="font-size:0.78em;color:var(--text-muted)"></div>
 </div>
 
 <div class="dip-controls">
@@ -275,15 +274,15 @@ body { background: var(--dip-bg-dark); }
             <tbody id="dip-tbody"></tbody>
         </table>
     </div>
-    <div id="dip-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim)">
+    <div id="dip-empty" style="display:none;text-align:center;padding:40px;color:var(--text-muted)">
         <p style="font-size:1.2em;margin-bottom:8px">No dip opportunities found</p>
         <p>Try lowering the minimum score or removing the trend filter.</p>
     </div>
 </div>
 
 <div class="card" style="margin-top:12px">
-    <h3 style="font-size:0.9em;margin-bottom:8px;color:var(--text-dim)">📖 Understanding the Dip Score</h3>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:0.75em;color:var(--text-dim);line-height:1.5">
+    <h3 style="font-size:0.9em;margin-bottom:8px;color:var(--text-muted)">📖 Understanding the Dip Score</h3>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:0.75em;color:var(--text-muted);line-height:1.5">
         <div><strong style="color:var(--dip-strong)">RSI(14) — 25 pts</strong><br>Below 30 = oversold. Bonus +5 if RSI rising from oversold.</div>
         <div><strong style="color:var(--dip-moderate)">% off 52W High — 25 pts</strong><br>>15% off high = deep pullback. >20% = extreme.</div>
         <div><strong style="color:var(--dip-watch)">Bollinger Band %B — 20 pts</strong><br>Below lower band (0.0) = price extreme. 0.0-0.2 = near lower band.</div>
