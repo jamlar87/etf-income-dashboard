@@ -5,7 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ETF Dip Screener — Buy the Dip</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
-<link rel="stylesheet" href="/static/css/style.v8.css">
+<link rel="stylesheet" href="/static/style.min.css?v=1">
+<link rel="stylesheet" href="/income/static/css/style.v8.css">
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="/"><img src="/static/wheel-logo.svg?t=1780286981" alt="" width="28" height="28" style="vertical-align:middle;margin-right:0.35em">WheelPicks</a>
+  </div>
+  <button class="nav-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/index-backtester">Backtest</a>
+    <a href="/income/">ETF Dashboard</a>
+    <a href="/income/buy-the-dip" class="active">Dip Screener</a>
+    <a href="/income/tax-admin">Tax Scores</a>
+    <a href="/help">Help</a>
+    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+  </div>
+</nav>
 <style>
 /* Dip Screener Specific Styles */
 :root {
@@ -289,6 +308,14 @@ body { background: var(--dip-bg-dark); }
 
 </main>
 
-<script src="/static/js/dip-screener.js?10"></script>
+<script src="/income/static/js/dip-screener.js?10"></script>
+<script>
+function toggleTheme() {
+  const h = document.documentElement, cur = h.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  h.setAttribute('data-theme', next); localStorage.setItem('theme', next);
+  document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
+}
+</script>
 </body>
 </html>
