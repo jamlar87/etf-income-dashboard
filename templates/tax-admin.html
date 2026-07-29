@@ -104,7 +104,7 @@ let allData = [];
 let dirty = new Set();
 
 async function load() {
-    const r = await fetch('/api/tax-scores');
+    const r = await fetch('/income/api/tax-scores');
     allData = await r.json();
     const providers = [...new Set(allData.map(e => e.provider).filter(Boolean))].sort();
     const sel = document.getElementById('provider-filter');
@@ -169,7 +169,7 @@ async function saveAll() {
             return;
         }
         try {
-            const r = await fetch('/api/tax-scores', {
+            const r = await fetch('/income/api/tax-scores', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: `ticker=${encodeURIComponent(ticker)}&score=${encodeURIComponent(val)}`
