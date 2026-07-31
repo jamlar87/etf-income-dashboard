@@ -590,8 +590,8 @@ async function buildBasket() {
         el.innerHTML = '<p style="color:var(--muted)">Select ETFs using the checkbox column, then build a basket.</p>';
         return;
     }
-    const acct = document.querySelector('input[name="acct-type"]:checked')?.value || 'taxable';
-    const taxRate = acct === 'ira' ? 0.0 : (parseFloat(document.getElementById('tax-rate')?.value) || 20) / 100;
+    const acct = document.querySelector('input[name="basket-acct-type"]:checked')?.value || 'taxable';
+    const taxRate = acct === 'ira' ? 0.0 : (parseFloat(document.getElementById('basket-tax-rate')?.value) || 20) / 100;
     el.innerHTML = '<p>Computing…</p>';
     try {
         const resp = await fetch(`${API}/basket?tickers=${[...basketSel].join(',')}&tax_rate=${taxRate}`);
