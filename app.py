@@ -1,4 +1,6 @@
 """High Yield Income ETF Dashboard - FastAPI Backend"""
+import re
+import secrets
 import sqlite3
 import random
 import math
@@ -19,6 +21,38 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
 
 app = FastAPI(title="ETF Income Dashboard")
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Strict nonce-based CSP + standard security headers."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+
+    nonce = secrets.token_urlsafe(16)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+        "connect-src 'self' https:; frame-ancestors 'self'"
+    )
+    ct = response.headers.get("content-type", "")
+    if ct.startswith("text/html"):
+        chunks = [chunk async for chunk in response.body_iterator]
+        body = b"".join(chunks)
+        if b"<script" in body:
+            body = re.sub(br'\s+nonce="[^"]*"', b"", body)
+            body = re.sub(br"<script(?![^>]*\bsrc=)",
+                          b'<script nonce="' + nonce.encode() + b'"', body)
+        return HTMLResponse(
+            body, status_code=response.status_code,
+            headers={k: v for k, v in response.headers.items()
+                     if k.lower() not in ("content-length", "content-encoding")},
+        )
+    return response
 
 # Store DB on slow disk for efficiency; fall back to local if unmounted
 DB_PATH = "/media/james/SlowDisk1tb/etf-dashboard/etfs.db"

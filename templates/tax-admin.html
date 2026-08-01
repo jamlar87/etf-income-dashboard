@@ -46,7 +46,7 @@ tr:hover td { background: rgba(212,164,76,0.03); }
   <div class="nav-brand">
     <a href="/"><img src="/static/wheel-logo.svg?t=1780286981" alt="" width="28" height="28" style="vertical-align:middle;margin-right:0.35em">WheelPicks</a>
   </div>
-  <button class="nav-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+  <button class="nav-hamburger" data-click="__toggleNav" aria-label="Toggle menu">☰</button>
   <div class="nav-links">
     <a href="/">Home</a>
     <a href="/dashboard">Dashboard</a>
@@ -55,7 +55,7 @@ tr:hover td { background: rgba(212,164,76,0.03); }
     <a href="/income/buy-the-dip">Dip Screener</a>
     <a href="/income/tax-admin" class="active">Tax Scores</a>
     <a href="/help">Help</a>
-    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+    <button id="theme-toggle" data-click="toggleTheme" title="Toggle dark mode">🌙</button>
   </div>
 </nav>
 <h1>🏷️ Tax Treatment Scores</h1>
@@ -63,19 +63,19 @@ tr:hover td { background: rgba(212,164,76,0.03); }
 
 <div class="summary">
     <span>Scored: <b id="scored-count">0</b> / <b id="total-count">0</b></span>
-    <span><button class="btn" onclick="saveAll()">💾 Save All Changes</button></span>
+    <span><button class="btn" data-click="saveAll">💾 Save All Changes</button></span>
 </div>
 <div id="msg"></div>
 
 <div class="controls">
-    <label>Search: <input type="text" id="search" placeholder="ticker or name..." oninput="filterTable()"></label>
+    <label>Search: <input type="text" id="search" placeholder="ticker or name..." data-input="filterTable"></label>
     <label>Provider:
-        <select id="provider-filter" onchange="filterTable()">
+        <select id="provider-filter" data-change="filterTable">
             <option value="">All</option>
         </select>
     </label>
     <label>Score:
-        <select id="score-filter" onchange="filterTable()">
+        <select id="score-filter" data-change="filterTable">
             <option value="">All</option>
             <option value="unset">Unset only</option>
             <option value="set">Scored only</option>
@@ -131,14 +131,14 @@ function render() {
             <td>${e.name || ''}</td>
             <td>${e.provider || ''}</td>
             <td>${e.current_yield != null ? e.current_yield.toFixed(1) + '%' : '-'}</td>
-            <td><input type="number" class="score-input" id="score-${e.ticker}" value="${val}" min="0" max="1" step="0.05" onchange="markDirty('${e.ticker}')"></td>
+            <td><input type="number" class="score-input" id="score-${e.ticker}" value="${val}" min="0" max="1" step="0.05" data-change="markDirty" data-ticker="${e.ticker}"></td>
             <td>${hasScore ? '<span class="score-set">set</span>' : '<span class="score-unset">unset</span>'}
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', 0.9)">A</button>
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', 0.7)">B</button>
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', 0.5)">C</button>
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', 0.3)">D</button>
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', 0.1)">F</button>
-                <button class="btn-sm" onclick="quickScore('${e.ticker}', '')" style="color:var(--red)">×</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="0.9">A</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="0.7">B</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="0.5">C</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="0.3">D</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="0.1">F</button>
+                <button class="btn-sm" data-click="quickScore" data-ticker="${e.ticker}" data-weight="" style="color:var(--red)">×</button>
             </td>
         </tr>`;
     }).join('');
@@ -193,5 +193,6 @@ function toggleTheme() {
   document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
 }
 </script>
+<script src="/income/static/js/bindings.js?v=1"></script>
 </body>
 </html>

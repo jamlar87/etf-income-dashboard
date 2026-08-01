@@ -14,7 +14,7 @@
   <div class="nav-brand">
     <a href="/"><img src="/static/wheel-logo.svg?t=1780286981" alt="" width="28" height="28" style="vertical-align:middle;margin-right:0.35em">WheelPicks</a>
   </div>
-  <button class="nav-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')" aria-label="Toggle menu">☰</button>
+  <button class="nav-hamburger" data-click="__toggleNav" aria-label="Toggle menu">☰</button>
   <div class="nav-links">
     <a href="/">Home</a>
     <a href="/dashboard">Dashboard</a>
@@ -23,7 +23,7 @@
     <a href="/income/buy-the-dip" class="active">Dip Screener</a>
     <a href="/income/tax-admin">Tax Scores</a>
     <a href="/help">Help</a>
-    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+    <button id="theme-toggle" data-click="toggleTheme" title="Toggle dark mode">🌙</button>
   </div>
 </nav>
 <style>
@@ -317,5 +317,6 @@ function toggleTheme() {
   document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
 }
 </script>
+<script src="/income/static/js/bindings.js?v=1"></script>
 </body>
 </html>
