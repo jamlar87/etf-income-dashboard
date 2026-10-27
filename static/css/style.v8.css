@@ -750,3 +750,21 @@ th .info-tip::before {
     .card, .stat-card, .lb-section { background: #f5f5f5; border-color: #ddd; }
     .scroll-section { break-inside: avoid; }
 }
+
+/* Mobile: keep hover tooltips inside the viewport.
+   Absolute ::after boxes are always laid out (opacity 0), so a 220-300px
+   tooltip centred on an inline icon widened the layout viewport (~20px). */
+@media (max-width: 768px) {
+    .info-tip::after {
+        left: auto;
+        right: -6px;
+        transform: none;
+        width: min(240px, calc(100vw - 32px));
+        max-width: calc(100vw - 32px);
+    }
+    .info-tip::before {
+        left: auto;
+        right: 6px;
+        transform: none;
+    }
+}
